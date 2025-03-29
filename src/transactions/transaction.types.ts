@@ -40,6 +40,7 @@ export interface Transaction {
   wallet_address?: string;
   external_reference?: string | null;
   receiver_id?: string;
+  idCliente?: string | number;
 }
 
 export interface PaymentData {
