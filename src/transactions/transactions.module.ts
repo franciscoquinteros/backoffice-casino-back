@@ -8,16 +8,16 @@ import { RussiansWithdrawController } from './withdraw/withdrawler.controller';
 import { Account } from '../account/entities/account.entity';
 import { AccountModule } from '../account/account.module';
 import { ChatModule } from 'src/chat/chat.module';
+import { TransactionEntity } from './entities/transaction.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Account]),
-    forwardRef(() => AccountModule), // Usar forwardRef para evitar dependencia circular
+    TypeOrmModule.forFeature([Account, TransactionEntity]),
+    forwardRef(() => AccountModule),
     forwardRef(() => ChatModule),
   ],
   controllers: [IpnController, DepositController, RussiansWithdrawController, TransactionsController],
   providers: [IpnService],
   exports: [IpnService],
-
 })
 export class IpnModule { }
