@@ -1,7 +1,7 @@
-import { WithdrawData } from '../transaction.types';
-
-export interface RussiansWithdrawData extends WithdrawData {
-  // Puedes añadir aquí campos específicos para el retiro de "rusos"
-  // Por ejemplo:
-  russiansSpecificField?: string;
+export interface WithdrawData {
+  amount: number;
+  wallet_address: string;
+  dateCreated?: string;
+  withdraw_method: string;
+  idCliente?: string | number; // Añade esta línea
 }

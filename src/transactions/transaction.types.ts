@@ -15,12 +15,6 @@ export interface DepositData {
   paymentMethod?: string;
 }
 
-export interface WithdrawData {
-  amount: number;
-  wallet_address: string;
-  dateCreated?: string;
-  withdraw_method: string;
-}
 
 export interface Transaction {
   id: string | number;

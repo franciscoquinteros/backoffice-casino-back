@@ -2,13 +2,14 @@ import { forwardRef, Injectable, OnModuleInit, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import axios from 'axios';
-import { IpnNotification, DepositData, WithdrawData, Transaction, PaymentData } from './transaction.types';
+import { IpnNotification, DepositData, Transaction, PaymentData } from './transaction.types';
 import { RussiansDepositData } from './deposit/russians-deposit.types';
 import { AccountService } from '../account/account.service';
 import { Account } from '../account/entities/account.entity';
 import { WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 import { TransactionEntity } from './entities/transaction.entity';
+import { WithdrawData } from './withdraw/russianswithdraw.types';
 
 export { Transaction } from './transaction.types';
 
@@ -371,7 +372,7 @@ export class IpnService implements OnModuleInit {
   async validateWithMercadoPago(depositData: RussiansDepositData) {
     console.log('Validando depósito:', depositData);
     console.log('Email recibido para depósito:', depositData.email);
-  
+
     // Mapear RussiansDepositData a DepositData
     const depositToValidate: DepositData = {
       cbu: depositData.cbu,
@@ -379,7 +380,7 @@ export class IpnService implements OnModuleInit {
       idTransferencia: depositData.idTransferencia,
       dateCreated: depositData.dateCreated
     };
-  
+
     // Crear la transacción y guardarla en BD inmediatamente
     const newTransaction: Transaction = {
       id: depositToValidate.idTransferencia,
@@ -392,12 +393,12 @@ export class IpnService implements OnModuleInit {
       idCliente: depositData.idCliente,
       payer_email: depositData.email // Guardamos el email aquí
     };
-  
+
     console.log('Creando transacción con payer_email:', newTransaction.payer_email);
-  
+
     const savedTransaction = await this.saveTransaction(newTransaction);
     console.log('Transacción guardada, payer_email:', savedTransaction.payer_email);
-    
+
     this.transactions.push(savedTransaction);
 
 
@@ -552,7 +553,10 @@ export class IpnService implements OnModuleInit {
       description: `Retiro via ${withdrawData.withdraw_method}`,
       wallet_address: withdrawData.wallet_address,
       payment_method_id: withdrawData.withdraw_method,
+      idCliente: withdrawData.idCliente // Asegurarnos de guardar el ID del cliente
     };
+
+    console.log('Creando transacción de retiro:', newTransaction);
 
     // Guardar en BD y agregar a memoria
     const savedTransaction = await this.saveTransaction(newTransaction);
