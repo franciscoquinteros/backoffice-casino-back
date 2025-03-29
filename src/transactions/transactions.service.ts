@@ -353,7 +353,7 @@ export class IpnService implements OnModuleInit {
       idTransferencia: depositData.idTransferencia,
       dateCreated: depositData.dateCreated
     };
-
+  
     // Crear la transacción y guardarla en BD inmediatamente
     const newTransaction: Transaction = {
       id: depositToValidate.idTransferencia,
@@ -363,9 +363,10 @@ export class IpnService implements OnModuleInit {
       date_created: depositToValidate.dateCreated || new Date().toISOString(),
       description: 'Depósito pendiente de validación',
       cbu: depositToValidate.cbu,
-      idCliente: depositData.idCliente
+      idCliente: depositData.idCliente,
+      payer_email: depositData.email // Guardamos el email si viene en el depósito
     };
-
+  
     const savedTransaction = await this.saveTransaction(newTransaction);
     this.transactions.push(savedTransaction);
 

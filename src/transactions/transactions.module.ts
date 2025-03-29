@@ -9,6 +9,7 @@ import { Account } from '../account/entities/account.entity';
 import { AccountModule } from '../account/account.module';
 import { ChatModule } from 'src/chat/chat.module';
 import { TransactionEntity } from './entities/transaction.entity';
+import { ExternalDepositController } from './deposit/external-deposit.controller';
 
 @Module({
   imports: [
@@ -16,7 +17,7 @@ import { TransactionEntity } from './entities/transaction.entity';
     forwardRef(() => AccountModule),
     forwardRef(() => ChatModule),
   ],
-  controllers: [IpnController, DepositController, RussiansWithdrawController, TransactionsController],
+  controllers: [IpnController, DepositController, RussiansWithdrawController, TransactionsController, ExternalDepositController],
   providers: [IpnService],
   exports: [IpnService],
 })
