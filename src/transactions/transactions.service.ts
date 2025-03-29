@@ -26,6 +26,31 @@ export class IpnService implements OnModuleInit {
     private transactionRepository: Repository<TransactionEntity>
   ) { }
 
+  // Agregar este método a la clase IpnService
+
+  async updateTransactionEmail(id: string, email: string): Promise<void> {
+    try {
+      console.log(`Actualizando email de transacción ${id} a: ${email}`);
+
+      // Actualizar en la BD
+      await this.transactionRepository.update(id, {
+        payerEmail: email
+      });
+
+      // Actualizar en memoria
+      this.transactions = this.transactions.map(t => {
+        if (t.id.toString() === id) {
+          return { ...t, payer_email: email };
+        }
+        return t;
+      });
+
+      console.log(`Email de transacción ${id} actualizado correctamente`);
+    } catch (error) {
+      console.error(`Error al actualizar email de transacción ${id}:`, error);
+    }
+  }
+
   // Inicializar el servicio cargando todas las cuentas activas y transacciones
   async onModuleInit() {
     try {
@@ -345,7 +370,8 @@ export class IpnService implements OnModuleInit {
 
   async validateWithMercadoPago(depositData: RussiansDepositData) {
     console.log('Validando depósito:', depositData);
-
+    console.log('Email recibido para depósito:', depositData.email);
+  
     // Mapear RussiansDepositData a DepositData
     const depositToValidate: DepositData = {
       cbu: depositData.cbu,
@@ -364,10 +390,14 @@ export class IpnService implements OnModuleInit {
       description: 'Depósito pendiente de validación',
       cbu: depositToValidate.cbu,
       idCliente: depositData.idCliente,
-      payer_email: depositData.email // Guardamos el email si viene en el depósito
+      payer_email: depositData.email // Guardamos el email aquí
     };
   
+    console.log('Creando transacción con payer_email:', newTransaction.payer_email);
+  
     const savedTransaction = await this.saveTransaction(newTransaction);
+    console.log('Transacción guardada, payer_email:', savedTransaction.payer_email);
+    
     this.transactions.push(savedTransaction);
 
 

@@ -4,10 +4,20 @@ import { IpnService } from '../transactions.service';
 import { RussiansDepositData } from './russians-deposit.types';
 import { ApiTags, ApiOperation, ApiBody, ApiResponse } from '@nestjs/swagger';
 
+interface DepositResponseTransaction {
+  idClient: string;
+  type: 'deposit' | 'withdraw';
+  amount: number;
+  email: string;
+  status?: string;
+  date_created?: string;
+  description?: string;
+}
+
 interface DepositResult {
   status: string;
   message: string;
-  transaction?: Transaction;
+  transaction?: DepositResponseTransaction;
 }
 
 // Definir el DTO para el cuerpo de la solicitud
@@ -30,6 +40,7 @@ export class ExternalDepositController {
   async handleExternalDeposit(@Body() body: ExternalDepositDto): Promise<DepositResult> {
     try {
       console.log('Recibida solicitud de depósito externo:', body);
+      console.log('Email recibido:', body.email);
 
       if (!body.amount || !body.email || !body.idClient) {
         throw new HttpException(
@@ -44,20 +55,48 @@ export class ExternalDepositController {
         amount: body.amount,
         idTransferencia: `deposit_${Date.now()}`,
         dateCreated: new Date().toISOString(),
-        idCliente: body.idClient
+        idCliente: body.idClient,
+        email: body.email // Asegúrate de pasar el email aquí
       };
+
+      console.log('Datos enviados a validateWithMercadoPago, email:', depositData.email);
 
       // Llamar al servicio para procesar el depósito
       const result = await this.ipnService.validateWithMercadoPago(depositData);
+      
+      console.log('Resultado de validateWithMercadoPago:', result);
+      console.log('Email en resultado:', result.transaction.payer_email);
+      
+      // Si el email no se guardó en la transacción, actualizarlo manualmente
+      if (!result.transaction.payer_email) {
+        console.log('Email no encontrado en la transacción, actualizando manualmente...');
+        
+        // Crear una nueva transacción con el email
+        const updatedTransaction: Transaction = {
+          ...result.transaction,
+          payer_email: body.email
+        };
+        
+        // Guardar la transacción actualizada
+        await this.ipnService.updateTransactionEmail(
+          result.transaction.id.toString(), 
+          body.email
+        );
+      }
 
       // Crear y enviar la respuesta en el formato requerido
       const response: DepositResult = {
         status: result.status,
         message: result.status === 'success' ? 'true' : result.message,
         transaction: {
-          ...result.transaction,
-          idCliente: body.idClient, // Usar idCliente en lugar de idClient
-          payer_email: body.email, // Usar payer_email para ser consistente con el modelo Transaction
+          idClient: body.idClient,
+          type: 'deposit',
+          amount: typeof result.transaction.amount === 'number' 
+            ? result.transaction.amount 
+            : parseFloat(String(result.transaction.amount)),
+          email: body.email,
+          status: result.transaction.status,
+          date_created: result.transaction.date_created,
           description: result.transaction.description || 'Pending deposit'
         }
       };
