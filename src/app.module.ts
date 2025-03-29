@@ -13,6 +13,7 @@ import { IpnModule } from './transactions/transactions.module';
 import { ZendeskModule } from './ticketing/zendesk.module';
 import { ZendeskController } from './ticketing/zendesk.controller';
 import { OfficeModule } from './office/office.module';
+import { TransactionEntity } from './transactions/entities/transaction.entity';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { OfficeModule } from './office/office.module';
     IpnModule,
     ZendeskModule,
     OfficeModule,
+    TransactionEntity,
   ],
   controllers: [ZendeskController],
   providers: [],
