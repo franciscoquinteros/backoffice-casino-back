@@ -1,4 +1,6 @@
 import { forwardRef, Injectable, OnModuleInit, Inject } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import axios from 'axios';
 import { IpnNotification, DepositData, WithdrawData, Transaction, PaymentData } from './transaction.types';
 import { RussiansDepositData } from './deposit/russians-deposit.types';
@@ -6,7 +8,7 @@ import { AccountService } from '../account/account.service';
 import { Account } from '../account/entities/account.entity';
 import { WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
-
+import { TransactionEntity } from './entities/transaction.entity';
 
 export { Transaction } from './transaction.types';
 
@@ -19,17 +21,88 @@ export class IpnService implements OnModuleInit {
 
   constructor(
     @Inject(forwardRef(() => AccountService)) // Usar forwardRef para inyectar AccountService
-    private accountService: AccountService
+    private accountService: AccountService,
+    @InjectRepository(TransactionEntity)
+    private transactionRepository: Repository<TransactionEntity>
   ) { }
 
-  // Inicializar el servicio cargando todas las cuentas activas
+  // Inicializar el servicio cargando todas las cuentas activas y transacciones
   async onModuleInit() {
     try {
       // Cargar todas las cuentas al iniciar el servicio
       this.accounts = await this.accountService.findAll();
       console.log(`Servicio IPN inicializado con ${this.accounts.length} cuentas configuradas`);
+
+      // Cargar transacciones existentes desde la BD
+      try {
+        const dbTransactions = await this.transactionRepository.find({
+          order: { dateCreated: 'DESC' }
+        });
+
+        this.transactions = dbTransactions.map(entity => this.mapEntityToTransaction(entity));
+        console.log(`Cargadas ${this.transactions.length} transacciones desde la base de datos`);
+      } catch (error) {
+        console.error('Error al cargar transacciones desde la base de datos:', error);
+        this.transactions = [];
+      }
     } catch (error) {
       console.error('Error al inicializar el servicio IPN:', error);
+    }
+  }
+
+  // Mapear entidad a tipo Transaction
+  private mapEntityToTransaction(entity: TransactionEntity): Transaction {
+    return {
+      id: entity.id,
+      type: entity.type,
+      amount: entity.amount,
+      status: entity.status,
+      date_created: entity.dateCreated?.toISOString(),
+      description: entity.description,
+      payment_method_id: entity.paymentMethodId,
+      payer_id: entity.payerId,
+      payer_email: entity.payerEmail,
+      payer_identification: entity.payerIdentification,
+      external_reference: entity.externalReference,
+      cbu: entity.cbu,
+      wallet_address: entity.walletAddress,
+      receiver_id: entity.receiverId,
+      idCliente: entity.idCliente
+    };
+  }
+
+  // Mapear Transaction a entidad
+  private mapTransactionToEntity(transaction: Transaction): TransactionEntity {
+    const entity = new TransactionEntity();
+    entity.id = transaction.id.toString();
+    entity.type = transaction.type;
+    entity.amount = transaction.amount;
+    entity.status = transaction.status;
+    entity.description = transaction.description;
+    entity.dateCreated = transaction.date_created ? new Date(transaction.date_created) : null;
+    entity.paymentMethodId = transaction.payment_method_id;
+    entity.payerId = transaction.payer_id ? transaction.payer_id.toString() : null;
+    entity.payerEmail = transaction.payer_email;
+    entity.payerIdentification = transaction.payer_identification;
+    entity.externalReference = transaction.external_reference;
+    entity.cbu = transaction.cbu;
+    entity.walletAddress = transaction.wallet_address;
+    entity.receiverId = transaction.receiver_id;
+    entity.idCliente = transaction.idCliente?.toString() || null;
+    return entity;
+  }
+
+  // Método para guardar transacción en la base de datos
+  private async saveTransaction(transaction: Transaction): Promise<Transaction> {
+    try {
+      const entity = this.mapTransactionToEntity(transaction);
+      const savedEntity = await this.transactionRepository.save(entity);
+      console.log(`Transacción guardada en BD: ${savedEntity.id}`);
+      return this.mapEntityToTransaction(savedEntity);
+    } catch (error) {
+      console.error('Error al guardar transacción en BD:', error);
+      // Mantener el comportamiento anterior para no romper la funcionalidad
+      return transaction;
     }
   }
 
@@ -100,11 +173,14 @@ export class IpnService implements OnModuleInit {
         description: 'Error: No hay tokens de acceso configurados',
       };
 
-      this.transactions.push(transaction);
+      // Guardar en BD y agregar a memoria
+      const savedTransaction = await this.saveTransaction(transaction);
+      this.transactions.push(savedTransaction);
+
       return {
         status: 'error',
         message: 'No hay tokens de acceso configurados para Mercado Pago',
-        transaction
+        transaction: savedTransaction
       };
     }
 
@@ -205,14 +281,55 @@ export class IpnService implements OnModuleInit {
       cbu: associatedAccount?.cbu,
     };
 
-    console.log('Transacción de MP obtenida:', transaction);
-    this.transactions.push(transaction);
+    const savedTransaction = await this.saveTransaction(transaction);
+    this.transactions.push(savedTransaction);
 
     return {
       status: 'success',
       message: 'Notificación procesada correctamente',
-      transaction
+      transaction: savedTransaction
     };
+  }
+
+  async getTransactions(): Promise<Transaction[]> {
+    try {
+      const entities = await this.transactionRepository.find({
+        order: { dateCreated: 'DESC' }
+      });
+
+      const transactions = entities.map(this.mapEntityToTransaction);
+      console.log(`Obtenidas ${transactions.length} transacciones desde la BD`);
+      return transactions;
+    } catch (error) {
+      console.error('Error al obtener transacciones desde BD:', error);
+      // Fallback al comportamiento anterior
+      console.log('Devolviendo transacciones en memoria como fallback:', this.transactions.length);
+      return this.transactions;
+    }
+  }
+
+  // Actualizar transacción (por ejemplo, al aceptar una transacción)
+  async updateTransactionStatus(id: string, status: string): Promise<Transaction | null> {
+    try {
+      // Actualizar en BD
+      await this.transactionRepository.update(id, { status });
+
+      // Obtener la transacción actualizada
+      const updatedEntity = await this.transactionRepository.findOne({ where: { id } });
+      if (!updatedEntity) {
+        return null;
+      }
+
+      // Actualizar en memoria
+      this.transactions = this.transactions.map(t =>
+        t.id.toString() === id ? this.mapEntityToTransaction(updatedEntity) : t
+      );
+
+      return this.mapEntityToTransaction(updatedEntity);
+    } catch (error) {
+      console.error(`Error al actualizar estado de transacción ${id}:`, error);
+      return null;
+    }
   }
 
   // Buscar cuenta por receiver_id de Mercado Pago
@@ -222,11 +339,6 @@ export class IpnService implements OnModuleInit {
       (this.mapCbuToMpIdentifier(account.cbu) === receiverId ||
         account.mp_client_id === receiverId)
     );
-  }
-
-  getTransactions() {
-    console.log('Transacciones disponibles antes de devolver:', this.transactions);
-    return this.transactions;
   }
 
   async validateWithMercadoPago(depositData: RussiansDepositData) {
@@ -239,6 +351,23 @@ export class IpnService implements OnModuleInit {
       idTransferencia: depositData.idTransferencia,
       dateCreated: depositData.dateCreated
     };
+
+    // Crear la transacción y guardarla en BD inmediatamente
+    const newTransaction: Transaction = {
+      id: depositToValidate.idTransferencia,
+      type: 'deposit',
+      amount: depositToValidate.amount,
+      status: 'Pending',
+      date_created: depositToValidate.dateCreated || new Date().toISOString(),
+      description: 'Depósito pendiente de validación',
+      cbu: depositToValidate.cbu,
+      idCliente: depositData.idCliente 
+    };
+
+    const savedTransaction = await this.saveTransaction(newTransaction);
+    this.transactions.push(savedTransaction);
+
+
 
     // Obtener el token específico para este CBU
     const accessToken = this.getAccessTokenByCbu(depositToValidate.cbu);
@@ -277,12 +406,16 @@ export class IpnService implements OnModuleInit {
 
     if (matchingTransaction) {
       console.log('Depósito validado con éxito:', matchingTransaction);
-      // Actualizar automáticamente el estado a "Aceptado" si coincide con MP
-      const updatedTransactions = this.transactions.map(t =>
-        t.id === matchingTransaction.id ? { ...t, status: 'Aceptado' } : t
-      );
-      this.transactions = updatedTransactions;
-      return { status: 'success', transaction: matchingTransaction, message: 'Depósito validado automáticamente con Mercado Pago' };
+
+      // Actualizar en BD
+      await this.updateTransactionStatus(matchingTransaction.id.toString(), 'Aceptado');
+
+      // Actualizar en memoria (esto ya lo hace el updateTransactionStatus)
+      return {
+        status: 'success',
+        transaction: matchingTransaction,
+        message: 'Depósito validado automáticamente con Mercado Pago'
+      };
     }
 
     // Si no hay coincidencia local, consulta la API de MP usando el token específico
@@ -388,10 +521,17 @@ export class IpnService implements OnModuleInit {
       payment_method_id: withdrawData.withdraw_method,
     };
 
-    this.transactions.push(newTransaction);
-    console.log('Retiro almacenado:', newTransaction);
+    // Guardar en BD y agregar a memoria
+    const savedTransaction = await this.saveTransaction(newTransaction);
+    this.transactions.push(savedTransaction);
 
-    return { status: 'success', message: 'Retiro registrado, pendiente de validación', transaction: newTransaction };
+    console.log('Retiro almacenado:', savedTransaction);
+
+    return {
+      status: 'success',
+      message: 'Retiro registrado, pendiente de validación',
+      transaction: savedTransaction
+    };
   }
 
   private matchCbuWithMp(transaction: Transaction | PaymentData, cbu: string): boolean {
