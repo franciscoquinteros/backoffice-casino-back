@@ -94,4 +94,31 @@ export class ApiKeyController {
       }
     );
   }
+
+  @Post('generate-transaction-key')
+  @ApiOperation({ 
+    summary: 'Generate a key for accounts/cbus, deposit and withdraw operations',
+    description: 'Genera una API Key con permisos limitados específicamente para acceder a accounts/cbus, realizar depósitos y retiros'
+  })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'La API Key limitada ha sido creada correctamente',
+    type: ApiKeyResponseDto
+  })
+  @ApiBody({ type: GenerateLimitedKeyDto })
+  async generateTransactionKey(@Body() body: GenerateLimitedKeyDto): Promise<ApiKeyResponseDto> {
+    return this.apiKeyService.createApiKey(
+      body.name,
+      [
+        API_PERMISSIONS.ACCOUNTS_READ_CBUS,
+        API_PERMISSIONS.TRANSACTIONS_DEPOSIT,
+        API_PERMISSIONS.TRANSACTIONS_WITHDRAW
+      ],
+      {
+        clientName: body.clientName,
+        description: body.description || 'API Key con acceso limitado a accounts/cbus, depósitos y retiros',
+        expiresInDays: 365 // Un año de validez por defecto
+      }
+    );
+  }
 }

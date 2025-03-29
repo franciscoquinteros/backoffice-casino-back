@@ -13,5 +13,9 @@ export const API_PERMISSIONS = {
   // Permisos para Accounts
   ACCOUNTS_READ_CBUS: 'accounts:read-cbus',
 
+  // Permisos para Transacciones
+  TRANSACTIONS_DEPOSIT: 'transactions:deposit',
+  TRANSACTIONS_WITHDRAW: 'transactions:withdraw',
+
   // Otros permisos se pueden añadir aquí
 }; 
