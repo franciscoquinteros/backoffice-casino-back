@@ -35,7 +35,6 @@ import { TransactionEntity } from './transactions/entities/transaction.entity';
     IpnModule,
     ZendeskModule,
     OfficeModule,
-    TransactionEntity,
   ],
   controllers: [ZendeskController],
   providers: [],
