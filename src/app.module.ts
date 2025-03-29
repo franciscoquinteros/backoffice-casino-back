@@ -14,6 +14,8 @@ import { ZendeskModule } from './ticketing/zendesk.module';
 import { ZendeskController } from './ticketing/zendesk.controller';
 import { OfficeModule } from './office/office.module';
 import { TransactionEntity } from './transactions/entities/transaction.entity';
+import { ProxyController } from './proxy/proxy.controller';
+import { ProxyModule } from './proxy/proxy.module';
 
 @Module({
   imports: [
@@ -35,8 +37,9 @@ import { TransactionEntity } from './transactions/entities/transaction.entity';
     IpnModule,
     ZendeskModule,
     OfficeModule,
+    ProxyModule,
   ],
-  controllers: [ZendeskController],
+  controllers: [ZendeskController,],
   providers: [],
 })
 export class AppModule { }
