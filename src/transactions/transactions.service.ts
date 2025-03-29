@@ -55,7 +55,9 @@ export class IpnService implements OnModuleInit {
     return {
       id: entity.id,
       type: entity.type,
-      amount: entity.amount,
+      amount: typeof entity.amount === 'number'
+        ? entity.amount
+        : parseFloat(String(entity.amount)),
       status: entity.status,
       date_created: entity.dateCreated?.toISOString(),
       description: entity.description,
@@ -361,7 +363,7 @@ export class IpnService implements OnModuleInit {
       date_created: depositToValidate.dateCreated || new Date().toISOString(),
       description: 'Depósito pendiente de validación',
       cbu: depositToValidate.cbu,
-      idCliente: depositData.idCliente 
+      idCliente: depositData.idCliente
     };
 
     const savedTransaction = await this.saveTransaction(newTransaction);
