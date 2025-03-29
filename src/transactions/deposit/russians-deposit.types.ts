@@ -3,4 +3,5 @@ export interface RussiansDepositData {
     amount: number;
     idTransferencia: string;
     dateCreated?: string; // Opcional, si "los rusos" pueden enviar la fecha
+    idCliente?: string | number;
   }
