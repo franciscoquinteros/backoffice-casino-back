@@ -13,19 +13,16 @@ interface ValidationResult {
 export class DepositController {
     constructor(private readonly ipnService: IpnService) { }
 
-    @Post()
-    async validateDeposit(@Body() depositData: RussiansDepositData): Promise<ValidationResult> {
-        console.log('Datos de depósito recibidos:', depositData);
-        const validationResult: ValidationResult = await this.ipnService.validateWithMercadoPago(depositData);
+    @Post('deposit')
+    async handleDeposit(@Body() body: any) {
+        const depositData: RussiansDepositData = {
+            cbu: body.cbu || 'DEFAULT_CBU', // Ajusta según tu lógica
+            amount: body.amount,
+            idTransferencia: body.idTransferencia || `deposit_${Date.now()}`,
+            dateCreated: new Date().toISOString(),
+            idCliente: body.idCliente // Agregar esta línea
+        };
 
-        if (validationResult.status === 'success') {
-            return {
-                status: 'success',
-                message: 'Depósito validado con Mercado Pago',
-                transaction: validationResult.transaction
-            };
-        } else {
-            return { status: 'error', message: validationResult.message };
-        }
+        return this.ipnService.validateWithMercadoPago(depositData);
     }
 }
