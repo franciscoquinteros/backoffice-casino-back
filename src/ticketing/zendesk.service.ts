@@ -976,6 +976,32 @@ export class ZendeskService {
         }
     }
 
+    async updateInternalAssignment(ticketId: string, operatorId: string): Promise<void> {
+    // Buscar si ya existe una asignación para este ticket
+    const ticketAssignment = await this.ticketAssignmentRepository.findOne({
+        where: { zendeskTicketId: ticketId }
+    });
+    
+    if (ticketAssignment) {
+        // Actualizar la asignación existente
+        ticketAssignment.userId = Number(operatorId);
+        await this.ticketAssignmentRepository.save(ticketAssignment);
+    } else {
+        // Crear una nueva asignación
+        const newAssignment = this.ticketAssignmentRepository.create({
+            ticketId: parseInt(ticketId),
+            zendeskTicketId: ticketId,
+            userId: Number(operatorId),
+            status: 'open'
+        });
+        await this.ticketAssignmentRepository.save(newAssignment);
+    }
+    
+    this.logger.log(`Ticket ${ticketId} assigned internally to operator ${operatorId}`);
+}
+
+
+
     async getTicketsAssignedToOperator(operatorId: number): Promise<TicketResponseDto[]> {
         const ticketAssignments = await this.ticketAssignmentRepository.find({
             where: { userId: operatorId },

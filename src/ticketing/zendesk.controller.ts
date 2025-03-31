@@ -131,9 +131,51 @@ export class ZendeskController {
         @Param('ticketId') ticketId: string,
         @Body('comment') comment: string,
         @Body('authorId') authorId: string,
+        @Body('currentUserId') currentUserId: string, // ID del usuario actual en tu sistema interno
     ) {
-        return this.zendeskService.addTicketComment(ticketId, comment, authorId);
+        try {
+            // Primero intentar asignar el ticket al usuario actual internamente
+            if (currentUserId && currentUserId !== 'unknown') {
+                try {
+                    await this.updateInternalAssignment(ticketId, currentUserId);
+                } catch (error) {
+                    console.error(`Error al asignar el ticket internamente: ${error.message}`);
+                    // No interrumpir el flujo por error en la asignación
+                }
+            }
+
+            // Luego añadir el comentario usando la cuenta de Zendesk
+            return this.zendeskService.addTicketComment(ticketId, comment, authorId);
+        } catch (error) {
+            throw new HttpException(
+                `Error al añadir comentario: ${error.message}`,
+                HttpStatus.INTERNAL_SERVER_ERROR
+            );
+        }
     }
+
+    private async updateInternalAssignment(ticketId: string, operatorId: string): Promise<void> {
+        // Buscar si ya existe una asignación para este ticket
+        const ticketAssignment = await this.zendeskService.getTicketAssignmentRepository().findOne({
+            where: { zendeskTicketId: ticketId }
+        });
+
+        if (ticketAssignment) {
+            // Actualizar la asignación existente
+            ticketAssignment.userId = Number(operatorId);
+            await this.zendeskService.getTicketAssignmentRepository().save(ticketAssignment);
+        } else {
+            // Crear una nueva asignación
+            const newAssignment = this.zendeskService.getTicketAssignmentRepository().create({
+                ticketId: parseInt(ticketId),
+                zendeskTicketId: ticketId,
+                userId: Number(operatorId),
+                status: 'open'
+            });
+            await this.zendeskService.getTicketAssignmentRepository().save(newAssignment);
+        }
+    }
+
 
     @Put('tickets/:ticketId/assign')
     @ApiOperation({ summary: 'Assign a ticket to an agent' })
@@ -154,7 +196,7 @@ export class ZendeskController {
     async getOperatorsWithTicketCounts() {
         // Get all operators
         const operators = await this.zendeskService.getUserService().findUsersByRole('operador');
-        
+
         // Get ticket counts for each operator
         const operatorsWithCounts = await Promise.all(
             operators.map(async (operator) => {
@@ -169,7 +211,7 @@ export class ZendeskController {
                 };
             })
         );
-        
+
         return operatorsWithCounts;
     }
 
@@ -180,12 +222,12 @@ export class ZendeskController {
     ) {
         // First update in Zendesk if needed
         await this.zendeskService.asignTicket(ticketId, null); // Can set to null or a default Zendesk ID
-        
+
         // Update our internal assignment
         const ticketAssignment = await this.zendeskService.getTicketAssignmentRepository().findOne({
             where: { zendeskTicketId: ticketId }
         });
-        
+
         if (ticketAssignment) {
             ticketAssignment.userId = Number(operatorId);
             await this.zendeskService.getTicketAssignmentRepository().save(ticketAssignment);
@@ -199,7 +241,7 @@ export class ZendeskController {
             });
             await this.zendeskService.getTicketAssignmentRepository().save(newAssignment);
         }
-        
+
         // Get the updated ticket
         return this.zendeskService.getTicket(ticketId);
     }
