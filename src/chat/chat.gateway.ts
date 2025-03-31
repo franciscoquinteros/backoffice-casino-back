@@ -9,7 +9,7 @@ import { MessageDto, AgentMessageDto } from './dto/message.dto';
 @WebSocketGateway({
   cors: {
     origin: [
-      'https://backoffice-casino-front-production.up.railway.app',
+      'https://cocosadmin.com',
       'https://chat-casi-production.up.railway.app',
       'http://localhost:3000',
       'http://localhost:3001',
@@ -38,7 +38,7 @@ export class ChatGateway {
     private readonly conversationService: ConversationService
   ) {
     console.log('ChatGateway inicializado');
-    
+
     // Usar un intervalo más largo para el log de estado de conexiones
     // y evitar posibles problemas de rendimiento
     setInterval(() => this.logConnectionStatus(), 300000); // Log cada 5 minutos
@@ -50,7 +50,7 @@ export class ChatGateway {
       console.log('=== ESTADO DE CONEXIONES ===');
       console.log(`Clientes activos: ${this.activeChats.size}`);
       console.log(`Agentes activos: ${this.agentSockets.size}`);
-      
+
       // Limitar el número de conexiones que se muestran en el log para evitar sobrecarga
       let userCount = 0;
       this.activeChats.forEach((socketId, userId) => {
@@ -59,11 +59,11 @@ export class ChatGateway {
           userCount++;
         }
       });
-      
+
       if (this.activeChats.size > 10) {
         console.log(`... y ${this.activeChats.size - 10} usuarios más`);
       }
-      
+
       let agentCount = 0;
       this.agentSockets.forEach((socketId, agentId) => {
         if (agentCount < 10) { // Solo mostrar los primeros 10 agentes
@@ -71,11 +71,11 @@ export class ChatGateway {
           agentCount++;
         }
       });
-      
+
       if (this.agentSockets.size > 10) {
         console.log(`... y ${this.agentSockets.size - 10} agentes más`);
       }
-      
+
       console.log('===========================');
     } catch (error) {
       console.error('Error al loguear estado de conexiones:', error);
@@ -101,7 +101,7 @@ export class ChatGateway {
       console.log(`Eliminando usuario ${userId} de activeChats`);
       this.activeChats.delete(userId);
       this.socketToUser.delete(client.id);
-      
+
       // Notificar a todos sobre la desconexión del usuario
       this.server.to('general').emit('connectionStatus', {
         type: 'user',
@@ -115,7 +115,7 @@ export class ChatGateway {
       console.log(`Eliminando agente ${agentId} de agentSockets`);
       this.agentSockets.delete(agentId);
       this.socketToAgent.delete(client.id);
-      
+
       // Notificar a todos sobre la desconexión del agente
       this.server.to('general').emit('connectionStatus', {
         type: 'agent',
@@ -555,7 +555,7 @@ export class ChatGateway {
 
       // Obtener la conversación actualizada
       const updatedConversation = await this.conversationService.getConversationById(data.conversationId);
-      
+
       if (!updatedConversation) {
         return { success: false, error: 'No se pudo encontrar la conversación' };
       }
@@ -601,7 +601,7 @@ export class ChatGateway {
 
       // Obtener la conversación actualizada
       const updatedConversation = await this.conversationService.getConversationById(data.conversationId);
-      
+
       if (!updatedConversation) {
         return { success: false, error: 'No se pudo encontrar la conversación' };
       }
@@ -651,7 +651,7 @@ export class ChatGateway {
 
       // Solo loguear un resumen para evitar sobrecarga en la consola
       console.log(`Enviando ${formattedChats.length} conversaciones archivadas`);
-      
+
       // Emitir las conversaciones archivadas al cliente que las solicitó
       client.emit('archivedChats', formattedChats);
 
@@ -681,7 +681,7 @@ export class ChatGateway {
 
       // Solo loguear un resumen para evitar sobrecarga en la consola
       console.log(`Enviando ${formattedChats.length} conversaciones activas`);
-      
+
       // Emitir solo al cliente que lo solicitó
       client.emit('activeChats', formattedChats);
 
@@ -703,7 +703,7 @@ export class ChatGateway {
 
     try {
       let conversations;
-      
+
       if (data.isArchived) {
         // Si estamos buscando conversaciones archivadas
         const allConversations = await this.conversationService.getAllConversationsByUserId(data.userId);
@@ -785,7 +785,7 @@ export class ChatGateway {
 
     // Crear un array con todos los IDs de usuarios conectados
     const connectedUsers = Array.from(this.activeChats.keys());
-    
+
     // Enviar la lista completa de usuarios conectados en un solo evento
     client.emit('connectedUsers', connectedUsers);
 
