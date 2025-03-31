@@ -27,6 +27,7 @@ class ExternalDepositDto {
     email: string;
     idClient: string;
     cbu: string; // Campo CBU opcional
+    idTransaction: string;
 }
 
 @ApiTags('Deposits')
@@ -43,7 +44,7 @@ export class ExternalDepositController {
         try {
             console.log('Recibida solicitud de depósito externo:', body);
             console.log('Email recibido:', body.email);
-            console.log('CBU recibido:', body.cbu || 'No proporcionado');
+            console.log('ID Transacción recibido:', body.idTransaction || 'No proporcionado');
 
             if (!body.amount || !body.email || !body.idClient) {
                 throw new HttpException(
@@ -52,42 +53,68 @@ export class ExternalDepositController {
                 );
             }
 
-            // Usar el CBU proporcionado o un valor predeterminado
             const cbuToUse = body.cbu || 'DEFAULT_CBU';
+            
+            // PASO 1: Verificar si el idTransaction ya fue utilizado anteriormente
+            if (body.idTransaction) {
+                const allTransactions = await this.ipnService.getTransactions();
+                const existingTransaction = allTransactions.find(tx => 
+                    tx.external_reference === body.idTransaction || 
+                    tx.id.toString() === body.idTransaction
+                );
 
-            // *** NUEVO CÓDIGO: Buscar transacciones existentes que coincidan por monto y email ***
+                if (existingTransaction) {
+                    console.log(`El idTransaction ${body.idTransaction} ya fue utilizado anteriormente`);
+                    
+                    // Devolver respuesta de error
+                    return {
+                        status: 'error',
+                        message: 'Este ID de transacción ya fue procesado anteriormente',
+                        transaction: {
+                            idClient: body.idClient,
+                            type: 'deposit',
+                            amount: body.amount,
+                            email: body.email,
+                            status: 'Rechazado',
+                            date_created: new Date().toISOString(),
+                            description: 'Transacción rechazada: ID de transacción duplicado',
+                            cbu: cbuToUse
+                        }
+                    };
+                }
+            }
+
+            // PASO 2: Buscar transacciones existentes que coincidan por monto y email
             const allTransactions = await this.ipnService.getTransactions();
             console.log(`Buscando coincidencias entre ${allTransactions.length} transacciones...`);
-
-            // Buscar coincidencias exactas por monto y email (con estado Aceptado)
-            const matchingTransaction = allTransactions.find(tx =>
-                tx.type === 'deposit' &&
-                Math.abs(tx.amount - body.amount) < 0.01 &&
+            
+            const matchingTransaction = allTransactions.find(tx => 
+                tx.type === 'deposit' && 
+                Math.abs(tx.amount - body.amount) < 0.01 && 
                 tx.payer_email?.toLowerCase() === body.email.toLowerCase() &&
                 (tx.status === 'Aceptado' || tx.status === 'approved')
             );
 
             if (matchingTransaction) {
                 console.log('¡Encontrada transacción coincidente!', matchingTransaction);
-
-                // Crear directamente una transacción aceptada
-                const idTransferencia = `deposit_${Date.now()}`;
+                
+                // Crear transacción aceptada usando el idTransaction proporcionado
+                const idTransferencia = body.idTransaction || `deposit_${Date.now()}`;
                 const autoApprovedTransaction: Transaction = {
                     id: idTransferencia,
                     type: 'deposit',
                     amount: body.amount,
-                    status: 'Aceptado', // Marcamos como Aceptado directamente
+                    status: 'Aceptado',
                     date_created: new Date().toISOString(),
                     description: 'Depósito validado automáticamente',
                     cbu: cbuToUse,
                     idCliente: body.idClient,
-                    payer_email: body.email
+                    payer_email: body.email,
+                    external_reference: body.idTransaction // Guardar idTransaction como referencia externa
                 };
-
-                // Guardar la transacción
+                
                 await this.ipnService.saveTransaction(autoApprovedTransaction);
-
-                // Devolver respuesta exitosa
+                
                 return {
                     status: 'success',
                     message: 'true',
@@ -103,39 +130,28 @@ export class ExternalDepositController {
                     }
                 };
             }
-            // *** FIN DEL NUEVO CÓDIGO ***
 
-            // Si no hay coincidencia, seguir con el flujo normal
+            // Flujo normal si no hay coincidencia
             const depositData: RussiansDepositData = {
                 cbu: cbuToUse,
                 amount: body.amount,
-                idTransferencia: `deposit_${Date.now()}`,
+                idTransferencia: body.idTransaction || `deposit_${Date.now()}`,
                 dateCreated: new Date().toISOString(),
                 idCliente: body.idClient,
-                email: body.email
+                email: body.email,
+                externalReference: body.idTransaction // Guardar como referencia externa
             };
 
-            console.log('Datos enviados a validateWithMercadoPago, email:', depositData.email, 'cbu:', depositData.cbu);
-
-            // Llamar al servicio para procesar el depósito
             const result = await this.ipnService.validateWithMercadoPago(depositData);
 
-            console.log('Resultado de validateWithMercadoPago:', result);
-            console.log('Email en resultado:', result.transaction.payer_email);
-
-            // Si el email no se guardó en la transacción, actualizarlo manualmente
             if (!result.transaction.payer_email) {
-                console.log('Email no encontrado en la transacción, actualizando manualmente...');
-
-                // Actualizar el email en la transacción
                 await this.ipnService.updateTransactionEmail(
                     result.transaction.id.toString(),
                     body.email
                 );
             }
 
-            // Crear y enviar la respuesta en el formato requerido
-            const response: DepositResult = {
+            return {
                 status: result.status,
                 message: result.status === 'success' ? 'true' : result.message,
                 transaction: {
@@ -148,11 +164,9 @@ export class ExternalDepositController {
                     status: result.transaction.status,
                     date_created: result.transaction.date_created,
                     description: result.transaction.description || 'Pending deposit',
-                    cbu: cbuToUse // Incluir el CBU en la respuesta
+                    cbu: cbuToUse
                 }
             };
-
-            return response;
         } catch (error) {
             console.error('Error al procesar depósito externo:', error);
             throw new HttpException(

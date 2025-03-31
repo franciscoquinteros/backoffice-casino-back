@@ -5,4 +5,5 @@ export interface RussiansDepositData {
   dateCreated?: string;
   idCliente?: string | number;
   email?: string; // Añadido para soportar el email en los depósitos externos
+  externalReference?: string;
 }
