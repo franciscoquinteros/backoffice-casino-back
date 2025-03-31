@@ -95,7 +95,8 @@ export class IpnService implements OnModuleInit {
       cbu: entity.cbu,
       wallet_address: entity.walletAddress,
       receiver_id: entity.receiverId,
-      idCliente: entity.idCliente
+      idCliente: entity.idCliente,
+      reference_transaction: entity.referenceTransaction
     };
   }
 
@@ -117,6 +118,7 @@ export class IpnService implements OnModuleInit {
     entity.walletAddress = transaction.wallet_address;
     entity.receiverId = transaction.receiver_id;
     entity.idCliente = transaction.idCliente?.toString() || null;
+    entity.referenceTransaction = transaction.reference_transaction;
     return entity;
   }
 

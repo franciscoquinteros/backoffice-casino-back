@@ -12,7 +12,7 @@ interface DepositResponseTransaction {
     status?: string;
     date_created?: string;
     description?: string;
-    cbu?: string; // Añadir CBU a la respuesta
+    cbu?: string;
 }
 
 interface DepositResult {
@@ -21,12 +21,11 @@ interface DepositResult {
     transaction?: DepositResponseTransaction;
 }
 
-// Definir el DTO para el cuerpo de la solicitud
 class ExternalDepositDto {
     amount: number;
     email: string;
     idClient: string;
-    cbu: string; // Campo CBU opcional
+    cbu: string;
     idTransaction: string;
 }
 
@@ -43,9 +42,7 @@ export class ExternalDepositController {
     async handleExternalDeposit(@Body() body: ExternalDepositDto): Promise<DepositResult> {
         try {
             console.log('Recibida solicitud de depósito externo:', body);
-            console.log('Email recibido:', body.email);
-            console.log('ID Transacción recibido:', body.idTransaction || 'No proporcionado');
-
+            
             if (!body.amount || !body.email || !body.idClient) {
                 throw new HttpException(
                     'Se requieren los campos amount, email e idClient',
@@ -55,9 +52,11 @@ export class ExternalDepositController {
 
             const cbuToUse = body.cbu || 'DEFAULT_CBU';
             
-            // PASO 1: Verificar si el idTransaction ya fue utilizado anteriormente
+            // Obtener todas las transacciones
+            const allTransactions = await this.ipnService.getTransactions();
+            
+            // PASO 1: Verificar si ya se procesó este idTransaction específico
             if (body.idTransaction) {
-                const allTransactions = await this.ipnService.getTransactions();
                 const existingTransaction = allTransactions.find(tx => 
                     tx.external_reference === body.idTransaction || 
                     tx.id.toString() === body.idTransaction
@@ -65,8 +64,6 @@ export class ExternalDepositController {
 
                 if (existingTransaction) {
                     console.log(`El idTransaction ${body.idTransaction} ya fue utilizado anteriormente`);
-                    
-                    // Devolver respuesta de error
                     return {
                         status: 'error',
                         message: 'Este ID de transacción ya fue procesado anteriormente',
@@ -83,22 +80,72 @@ export class ExternalDepositController {
                     };
                 }
             }
-
-            // PASO 2: Buscar transacciones existentes que coincidan por monto y email
-            const allTransactions = await this.ipnService.getTransactions();
-            console.log(`Buscando coincidencias entre ${allTransactions.length} transacciones...`);
             
+            // PASO 2: Verificar si la combinación monto/email ha sido validada automáticamente antes
+            const autoValidatedTransactions = allTransactions.filter(tx => 
+                tx.type === 'deposit' && 
+                Math.abs(tx.amount - body.amount) < 0.01 && 
+                tx.payer_email?.toLowerCase() === body.email.toLowerCase() &&
+                tx.status === 'Aceptado' &&
+                tx.description?.includes('validado automáticamente')
+            );
+            
+            if (autoValidatedTransactions.length > 0) {
+                console.log(`Ya existe una validación automática para monto=${body.amount}, email=${body.email}`);
+                return {
+                    status: 'error',
+                    message: 'Esta combinación de monto y email ya fue validada automáticamente',
+                    transaction: {
+                        idClient: body.idClient,
+                        type: 'deposit',
+                        amount: body.amount,
+                        email: body.email,
+                        status: 'Rechazado',
+                        date_created: new Date().toISOString(),
+                        description: 'Transacción rechazada: Depósito ya validado anteriormente',
+                        cbu: cbuToUse
+                    }
+                };
+            }
+            
+            // PASO 3: Buscar transacción original que coincida (para validación automática)
+            // Solo buscar transacciones reales (no las validadas automáticamente)
             const matchingTransaction = allTransactions.find(tx => 
                 tx.type === 'deposit' && 
                 Math.abs(tx.amount - body.amount) < 0.01 && 
                 tx.payer_email?.toLowerCase() === body.email.toLowerCase() &&
-                (tx.status === 'Aceptado' || tx.status === 'approved')
+                (tx.status === 'Aceptado' || tx.status === 'approved') &&
+                !tx.description?.includes('validado automáticamente')
             );
 
             if (matchingTransaction) {
-                console.log('¡Encontrada transacción coincidente!', matchingTransaction);
+                console.log('¡Encontrada transacción coincidente real!', matchingTransaction);
                 
-                // Crear transacción aceptada usando el idTransaction proporcionado
+                // Verificar si esta transacción original ya fue usada para validar otra
+                const alreadyUsedForValidation = allTransactions.some(tx =>
+                    tx.description?.includes('validado automáticamente') &&
+                    tx.reference_transaction === matchingTransaction.id.toString()
+                );
+                
+                if (alreadyUsedForValidation) {
+                    console.log(`La transacción original ${matchingTransaction.id} ya fue usada para validar otra transacción`);
+                    return {
+                        status: 'error',
+                        message: 'La transacción original ya fue utilizada para validar otro depósito',
+                        transaction: {
+                            idClient: body.idClient,
+                            type: 'deposit',
+                            amount: body.amount,
+                            email: body.email,
+                            status: 'Rechazado',
+                            date_created: new Date().toISOString(),
+                            description: 'Transacción rechazada: Pago original ya validado',
+                            cbu: cbuToUse
+                        }
+                    };
+                }
+                
+                // Crear transacción aceptada
                 const idTransferencia = body.idTransaction || `deposit_${Date.now()}`;
                 const autoApprovedTransaction: Transaction = {
                     id: idTransferencia,
@@ -110,7 +157,8 @@ export class ExternalDepositController {
                     cbu: cbuToUse,
                     idCliente: body.idClient,
                     payer_email: body.email,
-                    external_reference: body.idTransaction // Guardar idTransaction como referencia externa
+                    external_reference: body.idTransaction,
+                    reference_transaction: matchingTransaction.id.toString() // Referencia a la transacción original
                 };
                 
                 await this.ipnService.saveTransaction(autoApprovedTransaction);
@@ -131,7 +179,7 @@ export class ExternalDepositController {
                 };
             }
 
-            // Flujo normal si no hay coincidencia
+            // Si llegamos aquí, seguimos con el flujo normal
             const depositData: RussiansDepositData = {
                 cbu: cbuToUse,
                 amount: body.amount,
@@ -139,7 +187,7 @@ export class ExternalDepositController {
                 dateCreated: new Date().toISOString(),
                 idCliente: body.idClient,
                 email: body.email,
-                externalReference: body.idTransaction // Guardar como referencia externa
+                externalReference: body.idTransaction
             };
 
             const result = await this.ipnService.validateWithMercadoPago(depositData);
