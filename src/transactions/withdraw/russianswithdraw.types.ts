@@ -3,5 +3,9 @@ export interface WithdrawData {
   wallet_address: string;
   dateCreated?: string;
   withdraw_method: string;
-  idCliente?: string | number; // Añade esta línea
+  idCliente?: string | number;
+  idTransaction?: string;
+  email?: string;
+  name?: string;
+  phoneNumber?: string;
 }

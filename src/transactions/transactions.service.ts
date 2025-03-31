@@ -555,8 +555,11 @@ export class IpnService implements OnModuleInit {
   async validateWithdraw(withdrawData: WithdrawData) {
     console.log('Validando retiro:', withdrawData);
 
+    // Generar un ID único o usar el proporcionado
+    const transactionId = withdrawData.idTransaction || `withdraw_${Date.now()}`;
+
     const newTransaction: Transaction = {
-      id: `withdraw_${Date.now()}`,
+      id: transactionId,
       type: 'withdraw',
       amount: withdrawData.amount,
       status: 'Pending',
@@ -564,7 +567,15 @@ export class IpnService implements OnModuleInit {
       description: `Retiro via ${withdrawData.withdraw_method}`,
       wallet_address: withdrawData.wallet_address,
       payment_method_id: withdrawData.withdraw_method,
-      idCliente: withdrawData.idCliente // Asegurarnos de guardar el ID del cliente
+      idCliente: withdrawData.idCliente,
+      payer_email: withdrawData.email,
+      payer_id: withdrawData.idCliente,
+      // Agregar los campos adicionales
+      payer_identification: {
+        type: 'name',
+        number: withdrawData.name
+      },
+      external_reference: withdrawData.phoneNumber // Usar phoneNumber como referencia externa
     };
 
     console.log('Creando transacción de retiro:', newTransaction);

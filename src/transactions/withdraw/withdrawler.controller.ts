@@ -6,6 +6,10 @@ import { WithdrawData } from './russianswithdraw.types';
 
 interface WithdrawResponseTransaction {
   idClient: string;
+  idTransaction: string;
+  email: string;
+  name: string;
+  phoneNumber: string;
   type: 'withdraw';
   amount: number;
   status?: string;
@@ -19,11 +23,15 @@ interface WithdrawResult {
   transaction?: WithdrawResponseTransaction;
 }
 
-// Definir el DTO para el cuerpo de la solicitud
+// Definir el DTO para el cuerpo de la solicitud con todos los campos requeridos
 class ExternalWithdrawDto {
   amount: number;
   cbu: string;
   idClient: string;
+  idTransaction: string;
+  email: string;
+  name: string;
+  phoneNumber: string;
 }
 
 @ApiTags('Withdraws')
@@ -40,9 +48,9 @@ export class ExternalWithdrawController {
     try {
       console.log('Recibida solicitud de retiro externo:', body);
 
-      if (!body.amount || !body.cbu || !body.idClient) {
+      if (!body.amount || !body.cbu || !body.idClient || !body.idTransaction || !body.email || !body.name || !body.phoneNumber) {
         throw new HttpException(
-          'Se requieren los campos amount, cbu e idClient',
+          'Se requieren todos los campos obligatorios',
           HttpStatus.BAD_REQUEST
         );
       }
@@ -53,7 +61,8 @@ export class ExternalWithdrawController {
         wallet_address: body.cbu, // Usamos el CBU como dirección de la wallet
         withdraw_method: 'bank_transfer', // Método por defecto
         dateCreated: new Date().toISOString(),
-        idCliente: body.idClient // Incluimos el ID del cliente
+        idCliente: body.idClient, // Incluimos el ID del cliente
+        // Podemos añadir campos adicionales si es necesario en la interfaz WithdrawData
       };
 
       console.log('Datos enviados a validateWithdraw:', withdrawData);
@@ -65,16 +74,20 @@ export class ExternalWithdrawController {
       
       // Crear y enviar la respuesta en el formato requerido
       const response: WithdrawResult = {
-        status: result.status,
-        message: result.status === 'success' ? 'Withdrawal registered, pending validation' : result.message,
+        status: 'success',
+        message: 'Withdrawal registered, pending validation',
         transaction: {
           idClient: body.idClient,
+          idTransaction: body.idTransaction,
+          email: body.email,
+          name: body.name,
+          phoneNumber: body.phoneNumber,
           type: 'withdraw',
           amount: typeof result.transaction.amount === 'number' 
             ? result.transaction.amount 
             : parseFloat(String(result.transaction.amount)),
-          status: result.transaction.status,
-          date_created: result.transaction.date_created,
+          status: 'Pending',
+          date_created: new Date().toISOString(),
           description: 'Withdrawal'
         }
       };
