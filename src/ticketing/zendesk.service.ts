@@ -99,22 +99,19 @@ export class ZendeskService {
         const auth = Buffer.from(`${env.ZENDESK_EMAIL}/token:${env.ZENDESK_TOKEN}`).toString('base64');
 
         try {
-            // Get all users first
+            // Obtener todos los usuarios primero
             const usersResponse = await firstValueFrom(
                 this.httpService.get(env.ZENDESK_URL_USERS, {
                     headers: {
                         'Authorization': `Basic ${auth}`,
                         'Content-Type': 'application/json',
                     },
-                    params: {
-                        query: 'role:end-user'
-                    }
                 })
             );
 
             const users: User[] = usersResponse.data.users;
 
-            // Get all tickets
+            // Obtener todos los tickets
             const ticketsResponse: AxiosResponse<{ tickets: TicketWithoutUser[] }> = await firstValueFrom(
                 this.httpService.get(env.ZENDESK_URL_TICKETS, {
                     headers: {
@@ -124,34 +121,35 @@ export class ZendeskService {
                 })
             );
 
-            // Get all ticket assignments from our database
-            const ticketAssignments = await this.ticketAssignmentRepository.find({});
-            
-            // Get all operators (users with 'operador' role)
-            const operators = await this.userService.findUsersByRole('operador');
+            // Obtener TODAS las asignaciones de tickets
+            const allTicketAssignments = await this.ticketAssignmentRepository.find({
+                relations: ['user'] // Cargar la relación con el usuario
+            });
 
-            // Map tickets and include user information
+            // Crear un mapa para búsqueda rápida por ID de ticket
+            const assignmentMap = new Map();
+            allTicketAssignments.forEach(assignment => {
+                assignmentMap.set(assignment.zendeskTicketId, assignment);
+            });
+
+            // Mapear tickets y añadir información de usuarios y asignaciones internas
             return Promise.all(ticketsResponse.data.tickets.map(async (ticket) => {
+                // Buscar usuario solicitante
                 const user = users.find(user => user.id === ticket.requester_id);
-                
-                // Find ticket assignment for this ticket
-                const ticketAssignment = ticketAssignments.find(
-                    assignment => assignment.zendeskTicketId === ticket.id.toString()
-                );
-                
-                // Find operator information if there's an assignment
+
+                // Buscar asignación interna
+                const ticketAssignment = assignmentMap.get(ticket.id.toString());
+
+                // Preparar la información del operador asignado interno
                 let internalAssignee = undefined;
-                if (ticketAssignment) {
-                    const operator = operators.find(op => op.id === ticketAssignment.userId);
-                    if (operator) {
-                        internalAssignee = {
-                            id: operator.id,
-                            name: operator.username,
-                            email: operator.email
-                        };
-                    }
+                if (ticketAssignment && ticketAssignment.user) {
+                    internalAssignee = {
+                        id: ticketAssignment.user.id,
+                        name: ticketAssignment.user.username,
+                        email: ticketAssignment.user.email
+                    };
                 }
-                
+
                 return {
                     id: ticket.id,
                     subject: ticket.subject,
@@ -171,6 +169,7 @@ export class ZendeskService {
                 };
             }));
         } catch (error) {
+            this.logger.error(`Error fetching all tickets: ${error.message}`, error.stack);
             throw new Error(`Error fetching tickets: ${error.message}`);
         }
     }
@@ -676,7 +675,7 @@ export class ZendeskService {
                 // Get all operator users from our database
                 const operatorUsers = await this.userService.findUsersByRole('operador');
                 console.log('Operadores encontrados:', operatorUsers.length, operatorUsers.map(op => op.username));
-                
+
                 if (operatorUsers.length > 0) {
                     // Get ticket assignments count for each operator
                     const operatorTicketCounts = await Promise.all(
@@ -724,7 +723,7 @@ export class ZendeskService {
                             email: operatorWithLeastTickets.user.email
                         }
                     };
-                    
+
                     return {
                         id: updatedTicket.id,
                         subject: updatedTicket.subject,
@@ -776,12 +775,12 @@ export class ZendeskService {
             );
 
             const ticket = response.data.ticket;
-            
+
             // Find ticket assignment for this ticket
             const ticketAssignment = await this.ticketAssignmentRepository.findOne({
                 where: { zendeskTicketId: ticketId }
             });
-            
+
             // Get operator information if there's an assignment
             let internalAssignee = undefined;
             if (ticketAssignment) {
@@ -794,7 +793,7 @@ export class ZendeskService {
                     };
                 }
             }
-            
+
             return {
                 id: ticket.id,
                 subject: ticket.subject,
@@ -977,28 +976,28 @@ export class ZendeskService {
     }
 
     async updateInternalAssignment(ticketId: string, operatorId: string): Promise<void> {
-    // Buscar si ya existe una asignación para este ticket
-    const ticketAssignment = await this.ticketAssignmentRepository.findOne({
-        where: { zendeskTicketId: ticketId }
-    });
-    
-    if (ticketAssignment) {
-        // Actualizar la asignación existente
-        ticketAssignment.userId = Number(operatorId);
-        await this.ticketAssignmentRepository.save(ticketAssignment);
-    } else {
-        // Crear una nueva asignación
-        const newAssignment = this.ticketAssignmentRepository.create({
-            ticketId: parseInt(ticketId),
-            zendeskTicketId: ticketId,
-            userId: Number(operatorId),
-            status: 'open'
+        // Buscar si ya existe una asignación para este ticket
+        const ticketAssignment = await this.ticketAssignmentRepository.findOne({
+            where: { zendeskTicketId: ticketId }
         });
-        await this.ticketAssignmentRepository.save(newAssignment);
+
+        if (ticketAssignment) {
+            // Actualizar la asignación existente
+            ticketAssignment.userId = Number(operatorId);
+            await this.ticketAssignmentRepository.save(ticketAssignment);
+        } else {
+            // Crear una nueva asignación
+            const newAssignment = this.ticketAssignmentRepository.create({
+                ticketId: parseInt(ticketId),
+                zendeskTicketId: ticketId,
+                userId: Number(operatorId),
+                status: 'open'
+            });
+            await this.ticketAssignmentRepository.save(newAssignment);
+        }
+
+        this.logger.log(`Ticket ${ticketId} assigned internally to operator ${operatorId}`);
     }
-    
-    this.logger.log(`Ticket ${ticketId} assigned internally to operator ${operatorId}`);
-}
 
 
 
