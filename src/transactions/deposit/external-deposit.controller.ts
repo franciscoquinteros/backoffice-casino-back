@@ -42,7 +42,7 @@ export class ExternalDepositController {
     async handleExternalDeposit(@Body() body: ExternalDepositDto): Promise<DepositResult> {
         try {
             console.log('Recibida solicitud de depósito externo:', body);
-            
+
             if (!body.amount || !body.email || !body.idClient) {
                 throw new HttpException(
                     'Se requieren los campos amount, email e idClient',
@@ -51,14 +51,14 @@ export class ExternalDepositController {
             }
 
             const cbuToUse = body.cbu || 'DEFAULT_CBU';
-            
+
             // Obtener todas las transacciones
             const allTransactions = await this.ipnService.getTransactions();
-            
+
             // PASO 1: Verificar si ya se procesó este idTransaction específico
             if (body.idTransaction) {
-                const existingTransaction = allTransactions.find(tx => 
-                    tx.external_reference === body.idTransaction || 
+                const existingTransaction = allTransactions.find(tx =>
+                    tx.external_reference === body.idTransaction ||
                     tx.id.toString() === body.idTransaction
                 );
 
@@ -80,39 +80,60 @@ export class ExternalDepositController {
                     };
                 }
             }
-            
+
             // PASO 2: Verificar si la combinación monto/email ha sido validada automáticamente antes
-            const autoValidatedTransactions = allTransactions.filter(tx => 
-                tx.type === 'deposit' && 
-                Math.abs(tx.amount - body.amount) < 0.01 && 
+            const autoValidatedTransactions = allTransactions.filter(tx =>
+                tx.type === 'deposit' &&
+                Math.abs(tx.amount - body.amount) < 0.01 &&
                 tx.payer_email?.toLowerCase() === body.email.toLowerCase() &&
                 tx.status === 'Aceptado' &&
                 tx.description?.includes('validado automáticamente')
             );
-            
+
+            // Dentro del controlador, modificar la sección donde verifica si la combinación ya fue validada
             if (autoValidatedTransactions.length > 0) {
                 console.log(`Ya existe una validación automática para monto=${body.amount}, email=${body.email}`);
+
+                // En lugar de rechazar, creamos una transacción pendiente que requerirá verificación manual
+                const idTransferencia = body.idTransaction || `deposit_${Date.now()}`;
+                const pendingTransaction: Transaction = {
+                    id: idTransferencia,
+                    type: 'deposit',
+                    amount: body.amount,
+                    status: 'Pending', // Marcamos como pendiente en lugar de rechazado
+                    date_created: new Date().toISOString(),
+                    description: 'Depósito pendiente: Se requiere verificación manual (combinación usada anteriormente)',
+                    cbu: cbuToUse,
+                    idCliente: body.idClient,
+                    payer_email: body.email,
+                    external_reference: body.idTransaction
+                };
+
+                // Guardar transacción pendiente
+                await this.ipnService.saveTransaction(pendingTransaction);
+
+                // Devolver respuesta que indica que se requiere verificación manual
                 return {
-                    status: 'error',
-                    message: 'Esta combinación de monto y email ya fue validada automáticamente',
+                    status: 'pending',
+                    message: 'Esta combinación de monto y email ya fue validada anteriormente, se requiere verificación manual',
                     transaction: {
                         idClient: body.idClient,
                         type: 'deposit',
                         amount: body.amount,
                         email: body.email,
-                        status: 'Rechazado',
-                        date_created: new Date().toISOString(),
-                        description: 'Transacción rechazada: Depósito ya validado anteriormente',
+                        status: 'Pending',
+                        date_created: pendingTransaction.date_created,
+                        description: pendingTransaction.description,
                         cbu: cbuToUse
                     }
                 };
             }
-            
+
             // PASO 3: Buscar transacción original que coincida (para validación automática)
             // Solo buscar transacciones reales (no las validadas automáticamente)
-            const matchingTransaction = allTransactions.find(tx => 
-                tx.type === 'deposit' && 
-                Math.abs(tx.amount - body.amount) < 0.01 && 
+            const matchingTransaction = allTransactions.find(tx =>
+                tx.type === 'deposit' &&
+                Math.abs(tx.amount - body.amount) < 0.01 &&
                 tx.payer_email?.toLowerCase() === body.email.toLowerCase() &&
                 (tx.status === 'Aceptado' || tx.status === 'approved') &&
                 !tx.description?.includes('validado automáticamente')
@@ -120,13 +141,13 @@ export class ExternalDepositController {
 
             if (matchingTransaction) {
                 console.log('¡Encontrada transacción coincidente real!', matchingTransaction);
-                
+
                 // Verificar si esta transacción original ya fue usada para validar otra
                 const alreadyUsedForValidation = allTransactions.some(tx =>
                     tx.description?.includes('validado automáticamente') &&
                     tx.reference_transaction === matchingTransaction.id.toString()
                 );
-                
+
                 if (alreadyUsedForValidation) {
                     console.log(`La transacción original ${matchingTransaction.id} ya fue usada para validar otra transacción`);
                     return {
@@ -144,7 +165,7 @@ export class ExternalDepositController {
                         }
                     };
                 }
-                
+
                 // Crear transacción aceptada
                 const idTransferencia = body.idTransaction || `deposit_${Date.now()}`;
                 const autoApprovedTransaction: Transaction = {
@@ -160,9 +181,9 @@ export class ExternalDepositController {
                     external_reference: body.idTransaction,
                     reference_transaction: matchingTransaction.id.toString() // Referencia a la transacción original
                 };
-                
+
                 await this.ipnService.saveTransaction(autoApprovedTransaction);
-                
+
                 return {
                     status: 'success',
                     message: 'true',
