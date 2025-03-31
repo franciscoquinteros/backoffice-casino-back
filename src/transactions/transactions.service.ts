@@ -121,15 +121,24 @@ export class IpnService implements OnModuleInit {
   }
 
   // Método para guardar transacción en la base de datos
-  private async saveTransaction(transaction: Transaction): Promise<Transaction> {
+  // En IpnService (transactions.service.ts)
+  async saveTransaction(transaction: Transaction): Promise<Transaction> {
     try {
       const entity = this.mapTransactionToEntity(transaction);
       const savedEntity = await this.transactionRepository.save(entity);
       console.log(`Transacción guardada en BD: ${savedEntity.id}`);
+
+      // Actualizar también en memoria si es necesario
+      const existingIndex = this.transactions.findIndex(t => t.id === transaction.id);
+      if (existingIndex >= 0) {
+        this.transactions[existingIndex] = this.mapEntityToTransaction(savedEntity);
+      } else {
+        this.transactions.push(this.mapEntityToTransaction(savedEntity));
+      }
+
       return this.mapEntityToTransaction(savedEntity);
     } catch (error) {
       console.error('Error al guardar transacción en BD:', error);
-      // Mantener el comportamiento anterior para no romper la funcionalidad
       return transaction;
     }
   }

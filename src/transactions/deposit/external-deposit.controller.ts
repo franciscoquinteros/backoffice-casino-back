@@ -55,7 +55,57 @@ export class ExternalDepositController {
             // Usar el CBU proporcionado o un valor predeterminado
             const cbuToUse = body.cbu || 'DEFAULT_CBU';
 
-            // Crear el objeto RussiansDepositData a partir de los datos recibidos
+            // *** NUEVO CÓDIGO: Buscar transacciones existentes que coincidan por monto y email ***
+            const allTransactions = await this.ipnService.getTransactions();
+            console.log(`Buscando coincidencias entre ${allTransactions.length} transacciones...`);
+
+            // Buscar coincidencias exactas por monto y email (con estado Aceptado)
+            const matchingTransaction = allTransactions.find(tx =>
+                tx.type === 'deposit' &&
+                Math.abs(tx.amount - body.amount) < 0.01 &&
+                tx.payer_email?.toLowerCase() === body.email.toLowerCase() &&
+                (tx.status === 'Aceptado' || tx.status === 'approved')
+            );
+
+            if (matchingTransaction) {
+                console.log('¡Encontrada transacción coincidente!', matchingTransaction);
+
+                // Crear directamente una transacción aceptada
+                const idTransferencia = `deposit_${Date.now()}`;
+                const autoApprovedTransaction: Transaction = {
+                    id: idTransferencia,
+                    type: 'deposit',
+                    amount: body.amount,
+                    status: 'Aceptado', // Marcamos como Aceptado directamente
+                    date_created: new Date().toISOString(),
+                    description: 'Depósito validado automáticamente',
+                    cbu: cbuToUse,
+                    idCliente: body.idClient,
+                    payer_email: body.email
+                };
+
+                // Guardar la transacción
+                await this.ipnService.saveTransaction(autoApprovedTransaction);
+
+                // Devolver respuesta exitosa
+                return {
+                    status: 'success',
+                    message: 'true',
+                    transaction: {
+                        idClient: body.idClient,
+                        type: 'deposit',
+                        amount: body.amount,
+                        email: body.email,
+                        status: 'Aceptado',
+                        date_created: autoApprovedTransaction.date_created,
+                        description: autoApprovedTransaction.description,
+                        cbu: cbuToUse
+                    }
+                };
+            }
+            // *** FIN DEL NUEVO CÓDIGO ***
+
+            // Si no hay coincidencia, seguir con el flujo normal
             const depositData: RussiansDepositData = {
                 cbu: cbuToUse,
                 amount: body.amount,
