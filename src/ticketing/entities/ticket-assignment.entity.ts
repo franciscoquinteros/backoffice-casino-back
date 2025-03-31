@@ -25,7 +25,7 @@ export class TicketAssignment {
     @CreateDateColumn({
         type: 'timestamp with time zone',
         default: () => 'CURRENT_TIMESTAMP(6)',
-        name: 'created_at'
+        name: 'created_at'  
     })
     createdAt: Date;
 
