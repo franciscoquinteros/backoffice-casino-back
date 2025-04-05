@@ -74,6 +74,22 @@ export class AccountService {
     // No es necesario quitar del IPN ya que las cuentas eliminadas se filtran automáticamente
   }
 
+  async findCbuByAgent(idAgent: string): Promise<string> {
+    const account = await this.accountRepository.findOne({
+      select: ['cbu'],
+      where: { 
+        agent: idAgent, 
+        status: 'active' 
+      }
+    });
+  
+    if (!account) {
+      throw new NotFoundException(`No active account found for agent ${idAgent}`);
+    }
+  
+    return account.cbu;
+  }
+
   async findAllCbus(): Promise<string[]> {
     const accounts = await this.accountRepository.find({
       select: ['cbu'],

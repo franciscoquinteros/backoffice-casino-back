@@ -1,14 +1,14 @@
-import { Controller, Get, Post, Body, Param, Delete, Put, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, Put, HttpCode, HttpStatus, BadRequestException, Query } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AccountService } from './account.service';
-import { AccountDto, AccountsResponseDto, CbuResponseDto, CreateAccountDto } from './dto/account.dto';
+import { AccountDto, AccountsResponseDto, CbuSingleResponseDto, CreateAccountDto } from './dto/account.dto';
 import { ApiKeyAuth } from '../auth/apikeys/decorators/api-key-auth.decorator';
 import { API_PERMISSIONS } from '../auth/apikeys/permissions.constants';
 
 @ApiTags('Accounts')
 @Controller('accounts')
 export class AccountController {
-  constructor(private readonly accountService: AccountService) {}
+  constructor(private readonly accountService: AccountService) { }
 
   @Get()
   @ApiOperation({ summary: 'Get all accounts' })
@@ -22,17 +22,25 @@ export class AccountController {
     return { accounts };
   }
 
-  @Get('cbus')
+  @Get('cbu')
   @ApiKeyAuth(API_PERMISSIONS.ACCOUNTS_READ_CBUS)
-  @ApiOperation({ summary: 'Get all CBUs' })
+  @ApiOperation({ summary: 'Get CBU by agent ID' })
   @ApiResponse({
     status: 200,
-    description: 'List of all CBUs',
-    type: CbuResponseDto
+    description: 'The CBU for the specified agent',
+    type: CbuSingleResponseDto
   })
-  async getAllCbus(): Promise<CbuResponseDto> {
-    const cbus = await this.accountService.findAllCbus();
-    return { cbus };
+  @ApiResponse({
+    status: 404,
+    description: 'No active account found for the specified agent'
+  })
+  async getCbuByAgent(@Query('idAgent') idAgent: string): Promise<{ cbu: string }> {
+    if (!idAgent) {
+      throw new BadRequestException('idAgent query parameter is required');
+    }
+
+    const cbu = await this.accountService.findCbuByAgent(idAgent);
+    return { cbu }; // Respuesta en formato singular: { "cbu": "1111..." }
   }
 
   @Get(':id')

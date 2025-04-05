@@ -106,7 +106,7 @@ export class AccountsResponseDto {
   accounts: AccountDto[];
 }
 
-export class CbuResponseDto {
-  @ApiProperty({ type: [String] })
-  cbus: string[];
+export class CbuSingleResponseDto {
+  @ApiProperty({ type: String })
+  cbu: string;
 }
