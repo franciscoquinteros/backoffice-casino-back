@@ -42,4 +42,35 @@ export class TransactionsController {
       transaction: updatedTransaction
     };
   }
+
+  // Nuevos endpoints para rechazar transacciones
+  @Post('/deposit/:id/reject')
+  async rejectDeposit(@Param('id') id: string): Promise<{ status: string; message: string; transaction: Transaction }> {
+    const updatedTransaction = await this.ipnService.updateTransactionStatus(id, 'Rechazado');
+    
+    if (!updatedTransaction) {
+      throw new HttpException('Transacción no encontrada', HttpStatus.NOT_FOUND);
+    }
+    
+    return {
+      status: 'success',
+      message: 'Transacción rechazada correctamente',
+      transaction: updatedTransaction
+    };
+  }
+
+  @Post('/withdraw/:id/reject')
+  async rejectWithdraw(@Param('id') id: string): Promise<{ status: string; message: string; transaction: Transaction }> {
+    const updatedTransaction = await this.ipnService.updateTransactionStatus(id, 'Rechazado');
+    
+    if (!updatedTransaction) {
+      throw new HttpException('Transacción no encontrada', HttpStatus.NOT_FOUND);
+    }
+    
+    return {
+      status: 'success',
+      message: 'Retiro rechazado correctamente',
+      transaction: updatedTransaction
+    };
+  }
 }
