@@ -1,8 +1,9 @@
-import { Controller, Post, Body, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, HttpException, HttpStatus, UseFilters } from '@nestjs/common';
 import { Transaction } from '../transaction.types';
 import { IpnService } from '../transactions.service';
 import { ApiTags, ApiOperation, ApiBody, ApiResponse } from '@nestjs/swagger';
 import { WithdrawData } from './russianswithdraw.types';
+import { CustomHttpExceptionFilter } from 'src/common/filters/http-exception.filter';
 
 interface WithdrawResponseTransaction {
   idClient: string;
@@ -36,6 +37,7 @@ class ExternalWithdrawDto {
 
 @ApiTags('Withdraws')
 @Controller()
+@UseFilters(new CustomHttpExceptionFilter())
 export class ExternalWithdrawController {
   constructor(private readonly ipnService: IpnService) {}
 
@@ -72,27 +74,12 @@ export class ExternalWithdrawController {
       
       console.log('Resultado de validateWithdraw:', result);
       
-      // Crear y enviar la respuesta en el formato requerido
-      const response: WithdrawResult = {
-        status: 'success',
-        message: 'Withdrawal registered, pending validation',
-        transaction: {
-          idClient: body.idClient,
-          idTransaction: body.idTransaction,
-          email: body.email,
-          name: body.name,
-          phoneNumber: body.phoneNumber,
-          type: 'withdraw',
-          amount: typeof result.transaction.amount === 'number' 
-            ? result.transaction.amount 
-            : parseFloat(String(result.transaction.amount)),
-          status: 'Pending',
-          date_created: new Date().toISOString(),
-          description: 'Withdrawal'
-        }
-      };
+      
 
-      return response;
+      return {
+        status: 'success',
+        message: '' // Mensaje vacío como solicitaste
+    };
     } catch (error) {
       console.error('Error al procesar retiro externo:', error);
       throw new HttpException(

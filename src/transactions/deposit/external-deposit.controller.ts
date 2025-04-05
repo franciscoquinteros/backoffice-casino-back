@@ -4,21 +4,10 @@ import { IpnService } from '../transactions.service';
 import { RussiansDepositData } from './russians-deposit.types';
 import { ApiTags, ApiOperation, ApiBody, ApiResponse } from '@nestjs/swagger';
 
-interface DepositResponseTransaction {
-    idClient: string;
-    type: 'deposit' | 'withdraw';
-    amount: number;
-    email: string;
-    status?: string;
-    date_created?: string;
-    description?: string;
-    cbu?: string;
-}
-
-interface DepositResult {
+// Estructura simplificada para la respuesta del endpoint
+interface SimpleResponse {
     status: string;
     message: string;
-    transaction?: DepositResponseTransaction;
 }
 
 class ExternalDepositDto {
@@ -39,18 +28,26 @@ export class ExternalDepositController {
     @ApiBody({ type: ExternalDepositDto })
     @ApiResponse({ status: 200, description: 'Depósito registrado exitosamente' })
     @ApiResponse({ status: 400, description: 'Datos inválidos' })
-    async handleExternalDeposit(@Body() body: ExternalDepositDto): Promise<DepositResult> {
+    async handleExternalDeposit(@Body() body: ExternalDepositDto): Promise<SimpleResponse> {
         try {
             console.log('Recibida solicitud de depósito externo:', body);
 
             if (!body.amount || !body.email || !body.idClient) {
-                throw new HttpException(
-                    'Se requieren los campos amount, email e idClient',
-                    HttpStatus.BAD_REQUEST
-                );
+                return {
+                    status: 'error',
+                    message: 'Se requieren los campos amount, email e idClient'
+                };
             }
 
             const cbuToUse = body.cbu || 'DEFAULT_CBU';
+
+            // Validación de CBU
+            if (!this.isValidCbu(cbuToUse)) {
+                return {
+                    status: 'error',
+                    message: 'incorrect CBU'
+                };
+            }
 
             // Obtener todas las transacciones
             const allTransactions = await this.ipnService.getTransactions();
@@ -64,19 +61,25 @@ export class ExternalDepositController {
 
                 if (existingTransaction) {
                     console.log(`El idTransaction ${body.idTransaction} ya fue utilizado anteriormente`);
+
+                    // Guardar la transacción rechazada para historial
+                    const rejectedTransaction: Transaction = {
+                        id: body.idTransaction || `deposit_${Date.now()}`,
+                        type: 'deposit',
+                        amount: body.amount,
+                        status: 'Rechazado',
+                        date_created: new Date().toISOString(),
+                        description: 'Transacción rechazada: ID de transacción duplicado',
+                        cbu: cbuToUse,
+                        idCliente: body.idClient,
+                        payer_email: body.email
+                    };
+
+                    await this.ipnService.saveTransaction(rejectedTransaction);
+
                     return {
                         status: 'error',
-                        message: 'Este ID de transacción ya fue procesado anteriormente',
-                        transaction: {
-                            idClient: body.idClient,
-                            type: 'deposit',
-                            amount: body.amount,
-                            email: body.email,
-                            status: 'Rechazado',
-                            date_created: new Date().toISOString(),
-                            description: 'Transacción rechazada: ID de transacción duplicado',
-                            cbu: cbuToUse
-                        }
+                        message: 'Este ID de transacción ya fue procesado anteriormente'
                     };
                 }
             }
@@ -112,20 +115,10 @@ export class ExternalDepositController {
                 // Guardar transacción pendiente
                 await this.ipnService.saveTransaction(pendingTransaction);
 
-                // Devolver respuesta que indica que se requiere verificación manual
+                // Devolver respuesta simplificada exitosa
                 return {
-                    status: 'pending',
-                    message: 'Esta combinación de monto y email ya fue validada anteriormente, se requiere verificación manual',
-                    transaction: {
-                        idClient: body.idClient,
-                        type: 'deposit',
-                        amount: body.amount,
-                        email: body.email,
-                        status: 'Pending',
-                        date_created: pendingTransaction.date_created,
-                        description: pendingTransaction.description,
-                        cbu: cbuToUse
-                    }
+                    status: 'success',
+                    message: ''
                 };
             }
 
@@ -150,19 +143,25 @@ export class ExternalDepositController {
 
                 if (alreadyUsedForValidation) {
                     console.log(`La transacción original ${matchingTransaction.id} ya fue usada para validar otra transacción`);
+
+                    // Guardar transacción rechazada para historial
+                    const rejectedTransaction: Transaction = {
+                        id: body.idTransaction || `deposit_${Date.now()}`,
+                        type: 'deposit',
+                        amount: body.amount,
+                        status: 'Rechazado',
+                        date_created: new Date().toISOString(),
+                        description: 'Transacción rechazada: Pago original ya validado',
+                        cbu: cbuToUse,
+                        idCliente: body.idClient,
+                        payer_email: body.email
+                    };
+
+                    await this.ipnService.saveTransaction(rejectedTransaction);
+
                     return {
                         status: 'error',
-                        message: 'La transacción original ya fue utilizada para validar otro depósito',
-                        transaction: {
-                            idClient: body.idClient,
-                            type: 'deposit',
-                            amount: body.amount,
-                            email: body.email,
-                            status: 'Rechazado',
-                            date_created: new Date().toISOString(),
-                            description: 'Transacción rechazada: Pago original ya validado',
-                            cbu: cbuToUse
-                        }
+                        message: 'La transacción original ya fue utilizada para validar otro depósito'
                     };
                 }
 
@@ -186,17 +185,7 @@ export class ExternalDepositController {
 
                 return {
                     status: 'success',
-                    message: 'true',
-                    transaction: {
-                        idClient: body.idClient,
-                        type: 'deposit',
-                        amount: body.amount,
-                        email: body.email,
-                        status: 'Aceptado',
-                        date_created: autoApprovedTransaction.date_created,
-                        description: autoApprovedTransaction.description,
-                        cbu: cbuToUse
-                    }
+                    message: ''
                 };
             }
 
@@ -220,28 +209,26 @@ export class ExternalDepositController {
                 );
             }
 
+            // Devolver respuesta simplificada
             return {
-                status: result.status,
-                message: result.status === 'success' ? 'true' : result.message,
-                transaction: {
-                    idClient: body.idClient,
-                    type: 'deposit',
-                    amount: typeof result.transaction.amount === 'number'
-                        ? result.transaction.amount
-                        : parseFloat(String(result.transaction.amount)),
-                    email: body.email,
-                    status: result.transaction.status,
-                    date_created: result.transaction.date_created,
-                    description: result.transaction.description || 'Pending deposit',
-                    cbu: cbuToUse
-                }
+                status: result.status === 'success' ? 'success' : 'error',
+                message: result.status === 'success' ? '' : result.message
             };
         } catch (error) {
             console.error('Error al procesar depósito externo:', error);
-            throw new HttpException(
-                error.message || 'Error al procesar el depósito',
-                error.status || HttpStatus.INTERNAL_SERVER_ERROR
-            );
+            return {
+                status: 'error',
+                message: error.message || 'Error al procesar el depósito'
+            };
         }
+    }
+
+    // Método auxiliar para validar CBU
+    private isValidCbu(cbu: string): boolean {
+        // Implementar la validación de CBU específica para tu negocio
+        // Por ejemplo, verificar si el CBU existe en las cuentas configuradas
+
+        // Ejemplo simple de validación (implementar lógica real)
+        return cbu && cbu.length > 0 && cbu !== 'INVALID_CBU';
     }
 }
