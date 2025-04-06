@@ -5,6 +5,10 @@ export class CreateOfficeDto {
   @IsString()
   name: string;
 
+  @IsNotEmpty()
+  @IsString()
+  agentAssigned: string;
+
   @IsOptional()
   @IsString()
   whatsapp?: string;

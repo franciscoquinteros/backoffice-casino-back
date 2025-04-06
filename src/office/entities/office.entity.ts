@@ -8,6 +8,9 @@ export class Office {
     @Column({ name: 'name', nullable: false })
     name: string;
 
+    @Column({ name: 'agent_assigned', nullable: false })
+    agentAssigned: string;
+
     @Column({ name: 'whatsapp', nullable: true })
     whatsapp: string;
 
