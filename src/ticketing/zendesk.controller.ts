@@ -221,40 +221,50 @@ export class ZendeskController {
         @Param('operatorId') operatorId: string
     ) {
         try {
-            // 1. Actualizar en Zendesk si es necesario (opcional)
-            // Si quieres mantener una única cuenta en Zendesk, puedes comentar esta línea
-            // await this.zendeskService.asignTicket(ticketId, null);
-
-            // 2. Buscar si ya existe una asignación para este ticket
+            // 1. Buscar si ya existe una asignación para este ticket
             const ticketAssignment = await this.zendeskService.getTicketAssignmentRepository().findOne({
-                where: { zendeskTicketId: ticketId }
+                where: { zendeskTicketId: ticketId },
+                relations: ['user'] // Importante: cargar la relación con el usuario
             });
 
-            // 3. Actualizar o crear la asignación
+            // 2. Actualizar o crear la asignación
             if (ticketAssignment) {
                 // Actualizar asignación existente
                 ticketAssignment.userId = Number(operatorId);
                 await this.zendeskService.getTicketAssignmentRepository().save(ticketAssignment);
-
-                // Registrar en logs para debugging
-                this.logger.log(`Ticket ${ticketId} reasignado al operador ${operatorId}`);
             } else {
                 // Crear nueva asignación
                 const ticketIdNumber = parseInt(ticketId);
                 const newAssignment = this.zendeskService.getTicketAssignmentRepository().create({
-                    ticketId: isNaN(ticketIdNumber) ? 0 : ticketIdNumber, // Valor predeterminado si no puede convertirse
+                    ticketId: isNaN(ticketIdNumber) ? 0 : ticketIdNumber,
                     zendeskTicketId: ticketId,
                     userId: Number(operatorId),
                     status: 'open'
                 });
                 await this.zendeskService.getTicketAssignmentRepository().save(newAssignment);
-
-                // Registrar en logs para debugging
-                this.logger.log(`Nueva asignación creada para ticket ${ticketId} al operador ${operatorId}`);
             }
 
-            // 4. Obtener y devolver el ticket completo con la información actualizada
+            // 3. Obtener el ticket actualizado con toda la información
             const updatedTicket = await this.zendeskService.getTicket(ticketId);
+
+            // 4. Obtener la información del operador asignado
+            const assignedUser = await this.zendeskService.getTicketAssignmentRepository().findOne({
+                where: { zendeskTicketId: ticketId },
+                relations: ['user']
+            });
+
+            // 5. Añadir la información del operador asignado al ticket
+            if (assignedUser && assignedUser.user) {
+                return {
+                    ...updatedTicket,
+                    internal_assignee: {
+                        id: assignedUser.user.id,
+                        name: assignedUser.user.username,
+                        email: assignedUser.user.email
+                    }
+                };
+            }
+
             return updatedTicket;
         } catch (error) {
             this.logger.error(`Error al reasignar ticket: ${error.message}`, error.stack);
