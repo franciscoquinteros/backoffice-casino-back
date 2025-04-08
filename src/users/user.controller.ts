@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Post, Param, Patch, Delete, UseInterceptors, ClassSerializerInterceptor, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Body, Controller, Get, Post, Param, Patch, Delete, UseInterceptors, ClassSerializerInterceptor, HttpCode, HttpStatus, Query, NotFoundException } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
@@ -13,6 +13,30 @@ export class UserController {
   constructor(
     private readonly userService: UserService
   ) { }
+
+  @Get('check-status')
+  @ApiOperation({ summary: 'Check user status by email' })
+  @ApiQuery({ name: 'email', required: true, type: String })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns user status',
+    schema: {
+      properties: {
+        status: { type: 'string' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'User not found'
+  })
+  async checkStatus(@Query('email') email: string) {
+    const user = await this.userService.findByEmail(email);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    return { status: user.status || 'active' };
+  }
 
   @Post()
   @ApiOperation({ summary: 'Create a new user' })
