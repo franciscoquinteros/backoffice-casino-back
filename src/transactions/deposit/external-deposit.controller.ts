@@ -10,12 +10,15 @@ interface SimpleResponse {
     message: string;
 }
 
+// Updated DTO to match the expected request payload
 class ExternalDepositDto {
     amount: number;
-    email: string;
+    emailOrDni: string;
     idClient: string;
     cbu: string;
     idTransaction: string;
+    idAgent?: string;
+    nombreDelTitular?: string;
 }
 
 @ApiTags('Deposits')
@@ -32,10 +35,11 @@ export class ExternalDepositController {
         try {
             console.log('Recibida solicitud de depósito externo:', body);
 
-            if (!body.amount || !body.email || !body.idClient) {
+            // Updated validation to use emailOrDni instead of email
+            if (!body.amount || !body.emailOrDni || !body.idClient) {
                 return {
                     status: 'error',
-                    message: 'Se requieren los campos amount, email e idClient'
+                    message: 'Fields amount, emailOrDni, and idClient are required'
                 };
             }
 
@@ -72,7 +76,7 @@ export class ExternalDepositController {
                         description: 'Transacción rechazada: ID de transacción duplicado',
                         cbu: cbuToUse,
                         idCliente: body.idClient,
-                        payer_email: body.email
+                        payer_email: body.emailOrDni  // Updated to use emailOrDni
                     };
 
                     await this.ipnService.saveTransaction(rejectedTransaction);
@@ -88,14 +92,14 @@ export class ExternalDepositController {
             const autoValidatedTransactions = allTransactions.filter(tx =>
                 tx.type === 'deposit' &&
                 Math.abs(tx.amount - body.amount) < 0.01 &&
-                tx.payer_email?.toLowerCase() === body.email.toLowerCase() &&
+                tx.payer_email?.toLowerCase() === body.emailOrDni.toLowerCase() &&
                 tx.status === 'Aceptado' &&
                 tx.description?.includes('validado automáticamente')
             );
 
             // Dentro del controlador, modificar la sección donde verifica si la combinación ya fue validada
             if (autoValidatedTransactions.length > 0) {
-                console.log(`Ya existe una validación automática para monto=${body.amount}, email=${body.email}`);
+                console.log(`Ya existe una validación automática para monto=${body.amount}, email=${body.emailOrDni}`);
 
                 // En lugar de rechazar, creamos una transacción pendiente que requerirá verificación manual
                 const idTransferencia = body.idTransaction || `deposit_${Date.now()}`;
@@ -108,7 +112,7 @@ export class ExternalDepositController {
                     description: 'Depósito pendiente: Se requiere verificación manual (combinación usada anteriormente)',
                     cbu: cbuToUse,
                     idCliente: body.idClient,
-                    payer_email: body.email,
+                    payer_email: body.emailOrDni, // Updated to use emailOrDni
                     external_reference: body.idTransaction
                 };
 
@@ -127,7 +131,7 @@ export class ExternalDepositController {
             const matchingTransaction = allTransactions.find(tx =>
                 tx.type === 'deposit' &&
                 Math.abs(tx.amount - body.amount) < 0.01 &&
-                tx.payer_email?.toLowerCase() === body.email.toLowerCase() &&
+                tx.payer_email?.toLowerCase() === body.emailOrDni.toLowerCase() &&
                 (tx.status === 'Aceptado' || tx.status === 'approved') &&
                 !tx.description?.includes('validado automáticamente')
             );
@@ -154,7 +158,7 @@ export class ExternalDepositController {
                         description: 'Transacción rechazada: Pago original ya validado',
                         cbu: cbuToUse,
                         idCliente: body.idClient,
-                        payer_email: body.email
+                        payer_email: body.emailOrDni // Updated to use emailOrDni
                     };
 
                     await this.ipnService.saveTransaction(rejectedTransaction);
@@ -176,7 +180,7 @@ export class ExternalDepositController {
                     description: 'Depósito validado automáticamente',
                     cbu: cbuToUse,
                     idCliente: body.idClient,
-                    payer_email: body.email,
+                    payer_email: body.emailOrDni, // Updated to use emailOrDni
                     external_reference: body.idTransaction,
                     reference_transaction: matchingTransaction.id.toString() // Referencia a la transacción original
                 };
@@ -196,16 +200,25 @@ export class ExternalDepositController {
                 idTransferencia: body.idTransaction || `deposit_${Date.now()}`,
                 dateCreated: new Date().toISOString(),
                 idCliente: body.idClient,
-                email: body.email,
+                email: body.emailOrDni, // Updated to use emailOrDni
                 externalReference: body.idTransaction
             };
+
+            // Add optional fields if present
+            if (body.idAgent) {
+                depositData['idAgent'] = body.idAgent;
+            }
+
+            if (body.nombreDelTitular) {
+                depositData['nombreDelTitular'] = body.nombreDelTitular;
+            }
 
             const result = await this.ipnService.validateWithMercadoPago(depositData);
 
             if (!result.transaction.payer_email) {
                 await this.ipnService.updateTransactionEmail(
                     result.transaction.id.toString(),
-                    body.email
+                    body.emailOrDni // Updated to use emailOrDni
                 );
             }
 
