@@ -7,6 +7,10 @@ export class UpdateOfficeDto {
 
   @IsOptional()
   @IsString()
+  agentAssigned?: string;
+
+  @IsOptional()
+  @IsString()
   whatsapp?: string;
 
   @IsOptional()

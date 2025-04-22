@@ -97,8 +97,8 @@ export class ApiKeyController {
 
   @Post('generate-transaction-key')
   @ApiOperation({ 
-    summary: 'Generate a key for accounts/cbus, deposit and withdraw operations',
-    description: 'Genera una API Key con permisos limitados específicamente para acceder a accounts/cbus, realizar depósitos y retiros'
+    summary: 'Generate a key for accounts/cbus, deposit, withdraw operations and ticket creation',
+    description: 'Genera una API Key con permisos limitados específicamente para acceder a accounts/cbus, realizar depósitos, retiros y crear tickets'
   })
   @ApiResponse({ 
     status: 201, 
@@ -112,11 +112,12 @@ export class ApiKeyController {
       [
         API_PERMISSIONS.ACCOUNTS_READ_CBUS,
         API_PERMISSIONS.TRANSACTIONS_DEPOSIT,
-        API_PERMISSIONS.TRANSACTIONS_WITHDRAW
+        API_PERMISSIONS.TRANSACTIONS_WITHDRAW,
+        API_PERMISSIONS.ZENDESK_CREATE_TICKET
       ],
       {
         clientName: body.clientName,
-        description: body.description || 'API Key con acceso limitado a accounts/cbus, depósitos y retiros',
+        description: body.description || 'API Key con acceso limitado a accounts/cbus, depósitos, retiros y creación de tickets',
         expiresInDays: 365 // Un año de validez por defecto
       }
     );
