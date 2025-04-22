@@ -221,7 +221,7 @@ export class ExternalDepositController {
                     body.emailOrDni // Updated to use emailOrDni
                 );
             }
-
+            console.log('Resultado de validateWithMercadoPago:', result);
             // Devolver respuesta simplificada
             if (result.status === 'error' && result.message && result.message.includes('Mercado Pago')) {
                 console.error('Error al validar el depósito con Mercado Pago:', result.message);
