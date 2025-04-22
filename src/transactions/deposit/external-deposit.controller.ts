@@ -223,10 +223,19 @@ export class ExternalDepositController {
             }
 
             // Devolver respuesta simplificada
-            return {
-                status: result.status === 'success' ? 'success' : 'error',
-                message: result.status === 'success' ? '' : result.message
-            };
+            if (result.status === 'error' && result.message && result.message.includes('Mercado Pago')) {
+                console.error('Error al validar el depósito con Mercado Pago:', result.message);
+                return {
+                    status: 'success',
+                    message: ''
+                };
+            } else {
+                // Mantenemos el comportamiento original para otros casos
+                return {
+                    status: result.status === 'success' ? 'success' : 'error',
+                    message: result.status === 'success' ? '' : result.message
+                };
+            }
         } catch (error) {
             console.error('Error al procesar depósito externo:', error);
             return {
