@@ -8,4 +8,5 @@ export interface WithdrawData {
   email?: string;
   name?: string;
   phoneNumber?: string;
+  nombreDelTitular?: string;
 }

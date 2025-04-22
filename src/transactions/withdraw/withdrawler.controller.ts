@@ -8,14 +8,16 @@ import { CustomHttpExceptionFilter } from 'src/common/filters/http-exception.fil
 interface WithdrawResponseTransaction {
   idClient: string;
   idTransaction: string;
-  email: string;
-  name: string;
-  phoneNumber: string;
   type: 'withdraw';
   amount: number;
   status?: string;
   date_created?: string;
   description?: string;
+  // Optional fields that may or may not be included
+  email?: string;
+  name?: string;
+  phoneNumber?: string;
+  nombreDelTitular?: string;
 }
 
 interface WithdrawResult {
@@ -24,15 +26,18 @@ interface WithdrawResult {
   transaction?: WithdrawResponseTransaction;
 }
 
-// Definir el DTO para el cuerpo de la solicitud con todos los campos requeridos
+// Updated DTO to match the expected request payload
 class ExternalWithdrawDto {
   amount: number;
   cbu: string;
   idClient: string;
   idTransaction: string;
-  email: string;
-  name: string;
-  phoneNumber: string;
+  nombreDelTitular: string;
+  
+  // Make the following fields optional as they aren't in your example request
+  email?: string;
+  name?: string;
+  phoneNumber?: string;
 }
 
 @ApiTags('Withdraws')
@@ -50,36 +55,73 @@ export class ExternalWithdrawController {
     try {
       console.log('Recibida solicitud de retiro externo:', body);
 
-      if (!body.amount || !body.cbu || !body.idClient || !body.idTransaction || !body.email || !body.name || !body.phoneNumber) {
+      // Updated validation to match the required fields in the example request
+      if (!body.amount || !body.cbu || !body.idClient || !body.idTransaction || !body.nombreDelTitular) {
         throw new HttpException(
-          'Se requieren todos los campos obligatorios',
+          'Se requieren los campos amount, cbu, idClient, idTransaction y nombreDelTitular',
           HttpStatus.BAD_REQUEST
         );
       }
 
-      // Crear el objeto WithdrawData a partir de los datos recibidos
+      // Create the WithdrawData object from the received data
       const withdrawData: WithdrawData = {
         amount: body.amount,
-        wallet_address: body.cbu, // Usamos el CBU como dirección de la wallet
-        withdraw_method: 'bank_transfer', // Método por defecto
+        wallet_address: body.cbu, // Using CBU as wallet address
+        withdraw_method: 'bank_transfer', // Default method
         dateCreated: new Date().toISOString(),
-        idCliente: body.idClient, // Incluimos el ID del cliente
-        // Podemos añadir campos adicionales si es necesario en la interfaz WithdrawData
+        idCliente: body.idClient,
+        nombreDelTitular: body.nombreDelTitular // Add the account holder name
       };
+
+      // Add optional fields if they exist
+      if (body.email) {
+        withdrawData['email'] = body.email;
+      }
+      
+      if (body.name) {
+        withdrawData['name'] = body.name;
+      }
+      
+      if (body.phoneNumber) {
+        withdrawData['phoneNumber'] = body.phoneNumber;
+      }
 
       console.log('Datos enviados a validateWithdraw:', withdrawData);
 
-      // Llamar al servicio para procesar el retiro
+      // Call the service to process the withdrawal
       const result = await this.ipnService.validateWithdraw(withdrawData);
       
       console.log('Resultado de validateWithdraw:', result);
       
-      
+      // Create and return a WithdrawResponseTransaction if not present in result
+      if (!result.transaction) {
+        const transaction: WithdrawResponseTransaction = {
+          idClient: body.idClient,
+          idTransaction: body.idTransaction,
+          type: 'withdraw',
+          amount: body.amount,
+          status: 'Pending',
+          date_created: new Date().toISOString(),
+          description: 'Retiro procesado desde sistema externo',
+          nombreDelTitular: body.nombreDelTitular
+        };
+        
+        // Add optional fields if they exist
+        if (body.email) transaction.email = body.email;
+        if (body.name) transaction.name = body.name; 
+        if (body.phoneNumber) transaction.phoneNumber = body.phoneNumber;
+        
+        return {
+          status: 'success',
+          message: '',
+          transaction: transaction
+        };
+      }
 
       return {
         status: 'success',
-        message: '' // Mensaje vacío como solicitaste
-    };
+        message: '' // Empty message as requested
+      };
     } catch (error) {
       console.error('Error al procesar retiro externo:', error);
       throw new HttpException(
