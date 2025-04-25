@@ -46,7 +46,7 @@ export class TransactionsController {
       const proxyResponse = await axios.post('http://18.216.231.42:8080/deposit', proxyPayload);
       console.log(`[${opId}] Respuesta del proxy:`, JSON.stringify(proxyResponse.data))
       // Verificar respuesta
-      if (proxyResponse.data.status === 'success') {
+      if (proxyResponse.data.status === 0 || proxyResponse.data.status === "0") {
         console.log(`[${opId}] FIN: Transacción aceptada y enviada correctamente al proxy`);
         // Opcional: actualizar la transacción con datos de la respuesta externa
         return {
