@@ -27,6 +27,47 @@ export class IpnService implements OnModuleInit {
     private transactionRepository: Repository<TransactionEntity>
   ) { }
 
+
+  // En IpnService (transactions.service.ts)
+  async updateTransactionDescription(id: string, description: string): Promise<Transaction | null> {
+    try {
+      await this.transactionRepository.update(id, { description });
+
+      // Actualizar en memoria
+      this.transactions = this.transactions.map(t => {
+        if (t.id.toString() === id) {
+          return { ...t, description };
+        }
+        return t;
+      });
+
+      const updatedEntity = await this.transactionRepository.findOne({ where: { id } });
+      return updatedEntity ? this.mapEntityToTransaction(updatedEntity) : null;
+    } catch (error) {
+      console.error(`Error al actualizar descripción de transacción ${id}:`, error);
+      return null;
+    }
+  }
+
+  async updateTransactionInfo(id: string, info: any): Promise<Transaction | null> {
+    try {
+      await this.transactionRepository.update(id, info);
+
+      // Actualizar en memoria
+      this.transactions = this.transactions.map(t => {
+        if (t.id.toString() === id) {
+          return { ...t, ...info };
+        }
+        return t;
+      });
+
+      const updatedEntity = await this.transactionRepository.findOne({ where: { id } });
+      return updatedEntity ? this.mapEntityToTransaction(updatedEntity) : null;
+    } catch (error) {
+      console.error(`Error al actualizar información adicional de transacción ${id}:`, error);
+      return null;
+    }
+  }
   // Agregar este método a la clase IpnService
 
   async updateTransactionEmail(id: string, email: string): Promise<void> {
