@@ -68,6 +68,16 @@ export class IpnService implements OnModuleInit {
       return null;
     }
   }
+
+  async getTransactionById(id: string): Promise<Transaction | null> {
+    try {
+      const entity = await this.transactionRepository.findOne({ where: { id } });
+      return entity ? this.mapEntityToTransaction(entity) : null;
+    } catch (error) {
+      console.error(`Error al obtener transacción ${id}:`, error);
+      return null;
+    }
+  }
   // Agregar este método a la clase IpnService
 
   async updateTransactionEmail(id: string, email: string): Promise<void> {
