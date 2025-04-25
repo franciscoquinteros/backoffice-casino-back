@@ -27,9 +27,9 @@ export class TransactionsController {
     try {
       // Mapear los campos necesarios
       const proxyPayload = {
-        user_id: updatedTransaction.idCliente?.toString(),
+        user_id: parseInt(updatedTransaction.idCliente?.toString(), 10), // Convertir a entero
         amount: updatedTransaction.amount,
-        transaction_id: updatedTransaction.id
+        transaction_id: updatedTransaction.id.toString()
       };
 
       // Comprobar que los datos necesarios existen
