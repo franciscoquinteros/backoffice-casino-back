@@ -381,6 +381,9 @@ export class IpnService implements OnModuleInit {
   }
 
   async validateWithMercadoPago(depositData: RussiansDepositData) {
+    const opId = `validate_${Date.now()}`;
+    console.log(`[${opId}] INICIO: Validando depósito:`, JSON.stringify(depositData));
+    console.log(`[${opId}] Email recibido para depósito:`, depositData.email);
     console.log('Validando depósito:', depositData);
     console.log('Email recibido para depósito:', depositData.email);
 

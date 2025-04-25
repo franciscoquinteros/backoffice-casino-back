@@ -32,8 +32,11 @@ export class ExternalDepositController {
     @ApiResponse({ status: 200, description: 'Depósito registrado exitosamente' })
     @ApiResponse({ status: 400, description: 'Datos inválidos' })
     async handleExternalDeposit(@Body() body: ExternalDepositDto): Promise<SimpleResponse> {
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        console.log(`[${requestId}] INICIO: Solicitud de depósito externo recibida:`, JSON.stringify(body));
         try {
             console.log('Recibida solicitud de depósito externo:', body);
+
 
             // Updated validation to use emailOrDni instead of email
             if (!body.amount || !body.emailOrDni || !body.idClient) {
@@ -212,15 +215,17 @@ export class ExternalDepositController {
             if (body.nombreDelTitular) {
                 depositData['nombreDelTitular'] = body.nombreDelTitular;
             }
-
+            console.log(`[${requestId}] Validando depósito:`, depositData);
             const result = await this.ipnService.validateWithMercadoPago(depositData);
-
+            console.log(`[${requestId}] Resultado de validateWithMercadoPago:`, JSON.stringify(result));
             if (!result.transaction.payer_email) {
                 await this.ipnService.updateTransactionEmail(
                     result.transaction.id.toString(),
                     body.emailOrDni // Updated to use emailOrDni
                 );
             }
+            console.log(`[${requestId}] FIN: Solicitud de depósito procesada. Resultado:`,
+                JSON.stringify({ status: result.status, message: result.message?.substring(0, 100) }));
             console.log('Resultado de validateWithMercadoPago:', result);
             // Devolver respuesta simplificada
             if (result.status === 'error' && result.message && result.message.includes('Mercado Pago')) {
