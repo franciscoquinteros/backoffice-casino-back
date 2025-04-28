@@ -13,6 +13,7 @@ export interface DepositData {
   idTransferencia: string;
   dateCreated?: string;
   paymentMethod?: string;
+  email?: string; // Añadido para soportar el email en los depósitos externos
 }
 
 

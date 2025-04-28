@@ -443,7 +443,8 @@ export class IpnService implements OnModuleInit {
       cbu: depositData.cbu,
       amount: depositData.amount,
       idTransferencia: depositData.idTransferencia,
-      dateCreated: depositData.dateCreated
+      dateCreated: depositData.dateCreated,
+      email: depositData.email,
     };
 
     // Crear la transacción y guardarla en BD inmediatamente
@@ -499,7 +500,11 @@ export class IpnService implements OnModuleInit {
         transaction.type === 'deposit' &&
         transaction.amount === depositToValidate.amount && // Coincidencia de monto
         this.matchCbuWithMp(transaction, depositToValidate.cbu) && // Coincidencia de CBU con receiver_id o bank_transfer_id
-        this.isDateCloseEnough(transaction.date_created, depositToValidate.dateCreated) // Coincidencia aproximada de fecha
+        this.isDateCloseEnough(transaction.date_created, depositToValidate.dateCreated) && // Coincidencia aproximada de fecha
+        // AÑADIR VALIDACIÓN POR EMAIL:
+        transaction.payer_email && // Asegurarse de que la transacción de MP tiene email
+        depositToValidate.email && // Asegurarse de que los datos del usuario tienen email
+        transaction.payer_email.toLowerCase() === depositToValidate.email.toLowerCase() // Comparar emails (ignorando mayúsculas/minúsculas)
       );
     });
 
@@ -554,7 +559,11 @@ export class IpnService implements OnModuleInit {
         return (
           payment.amount === depositToValidate.amount &&
           this.matchCbuWithMp({ payment_method_id: payment.payment_method_id, receiver_id: payment.receiver_id } as unknown as Transaction, depositToValidate.cbu) &&
-          this.isDateCloseEnough(payment.date_created, depositToValidate.dateCreated)
+          this.isDateCloseEnough(payment.date_created, depositToValidate.dateCreated) &&
+          // AÑADIR VALIDACIÓN POR EMAIL:
+          payment.payer_email && // Asegurarse de que el pago de MP tiene email
+          depositToValidate.email && // Asegurarse de que los datos del usuario tienen email
+          payment.payer_email.toLowerCase() === depositToValidate.email.toLowerCase() // Comparar emails (ignorando mayúsculas/minúsculas)
         );
       });
 
