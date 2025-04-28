@@ -37,6 +37,7 @@ export interface Transaction {
   receiver_id?: string;
   idCliente?: string | number;
   reference_transaction?: string;
+  relatedUserTransactionId?: string;
 }
 
 export interface PaymentData {
