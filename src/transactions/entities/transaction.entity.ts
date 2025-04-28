@@ -65,4 +65,7 @@ export class TransactionEntity {
 
     @Column({ name: 'reference_transaction', nullable: true })
     referenceTransaction: string;
+
+    @Column({ nullable: true })
+    relatedUserTransactionId: string; 
 }
