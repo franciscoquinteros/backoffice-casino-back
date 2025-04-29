@@ -11,7 +11,7 @@ export class TransactionEntity {
     })
     type: 'deposit' | 'withdraw';
 
-    @Column('decimal', { precision: 15, scale: 2 })
+    @Column('decimal', { precision: 20, scale: 1 })
     amount: number;
 
     @Column({ nullable: true, default: 'Pending' })
@@ -67,5 +67,8 @@ export class TransactionEntity {
     referenceTransaction: string;
 
     @Column({ nullable: true })
-    relatedUserTransactionId: string; 
+    relatedUserTransactionId: string;
+
+    @Column({ nullable: true })
+    office: string;
 }

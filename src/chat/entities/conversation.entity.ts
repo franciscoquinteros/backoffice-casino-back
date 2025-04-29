@@ -1,5 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany, UpdateDateColumn, JoinColumn, ManyToOne } from 'typeorm';
 import { Chat } from './chat.entity';
+//import { User } from 'mercadopago';
+import { User } from '../../users/entities/user.entity'; // Asegúrate de que la ruta sea correcta
 
 @Entity()
 export class Conversation {
@@ -11,6 +13,16 @@ export class Conversation {
 
     @Column({ name: 'agent_id', nullable: true })
     agentId: string;
+
+    // --- NUEVAS RELACIONES A USER ---
+    @ManyToOne(() => User) // Relación ManyToOne a User para el usuario que inició/es propietario
+    @JoinColumn({ name: 'user_id' }) // Especifica que usa la columna 'user_id' como FK
+    initiatingUser: User; // Nombre de la propiedad de relación
+
+    @ManyToOne(() => User, { nullable: true })// Relación ManyToOne a User para el agente asignado
+    @JoinColumn({ name: 'agent_id' }) // Especifica que usa la columna 'agent_id' como FK
+    assignedAgent: User; // Nombre de la propiedad de relación
+    // --- FIN NUEVAS RELACIONES ---
 
     @Column({ name: 'title', nullable: true })
     title: string;
