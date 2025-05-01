@@ -9,4 +9,6 @@ export interface WithdrawData {
   name?: string;
   phoneNumber?: string;
   nombreDelTitular?: string;
+  idAgent?: string;
+  payer_email?: string; // Añadido para soportar el email en los depósitos externos
 }

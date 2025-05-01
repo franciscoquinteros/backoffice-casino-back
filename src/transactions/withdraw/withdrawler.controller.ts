@@ -33,18 +33,19 @@ class ExternalWithdrawDto {
   idClient: string;
   idTransaction: string;
   nombreDelTitular: string;
-  
+
   // Make the following fields optional as they aren't in your example request
   email?: string;
   name?: string;
   phoneNumber?: string;
+  idAgent?: string; // Optional field for agent ID
 }
 
 @ApiTags('Withdraws')
 @Controller()
 @UseFilters(new CustomHttpExceptionFilter())
 export class ExternalWithdrawController {
-  constructor(private readonly ipnService: IpnService) {}
+  constructor(private readonly ipnService: IpnService) { }
 
   @Post('withdraw')
   @ApiOperation({ summary: 'Registrar un nuevo retiro desde sistema externo' })
@@ -70,18 +71,19 @@ export class ExternalWithdrawController {
         withdraw_method: 'bank_transfer', // Default method
         dateCreated: new Date().toISOString(),
         idCliente: body.idClient,
-        nombreDelTitular: body.nombreDelTitular // Add the account holder name
+        nombreDelTitular: body.nombreDelTitular, // Add the account holder name
+        idAgent: body.idAgent
       };
 
       // Add optional fields if they exist
       if (body.email) {
         withdrawData['email'] = body.email;
       }
-      
+
       if (body.name) {
         withdrawData['name'] = body.name;
       }
-      
+
       if (body.phoneNumber) {
         withdrawData['phoneNumber'] = body.phoneNumber;
       }
@@ -90,9 +92,9 @@ export class ExternalWithdrawController {
 
       // Call the service to process the withdrawal
       const result = await this.ipnService.validateWithdraw(withdrawData);
-      
+
       console.log('Resultado de validateWithdraw:', result);
-      
+
       // Create and return a WithdrawResponseTransaction if not present in result
       if (!result.transaction) {
         const transaction: WithdrawResponseTransaction = {
@@ -105,12 +107,12 @@ export class ExternalWithdrawController {
           description: 'Retiro procesado desde sistema externo',
           nombreDelTitular: body.nombreDelTitular
         };
-        
+
         // Add optional fields if they exist
         if (body.email) transaction.email = body.email;
-        if (body.name) transaction.name = body.name; 
+        if (body.name) transaction.name = body.name;
         if (body.phoneNumber) transaction.phoneNumber = body.phoneNumber;
-        
+
         return {
           status: 'success',
           message: '',

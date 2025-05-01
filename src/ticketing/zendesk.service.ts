@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { env } from 'process';
@@ -95,7 +95,7 @@ export class ZendeskService {
         }
     }
 
-    async getAllTickets(): Promise<TicketResponseDto[]> {
+    /* async getAllTickets(): Promise<TicketResponseDto[]> {
         const auth = Buffer.from(`${env.ZENDESK_EMAIL}/token:${env.ZENDESK_TOKEN}`).toString('base64');
 
         try {
@@ -172,6 +172,118 @@ export class ZendeskService {
             this.logger.error(`Error fetching all tickets: ${error.message}`, error.stack);
             throw new Error(`Error fetching tickets: ${error.message}`);
         }
+    } */
+
+    async getAllTickets(officeId?: string): Promise<TicketResponseDto[]> { // <-- Aceptar officeId opcional
+        const auth = Buffer.from(`${env.ZENDESK_EMAIL}/token:${env.ZENDESK_TOKEN}`).toString('base64');
+        console.log(`ZendeskService: Obteniendo todos los tickets${officeId ? ` para oficina ${officeId}` : ''}`);
+
+
+        try {
+            // 1. Obtener todos los usuarios de Zendesk (necesario para el mapeo de tickets)
+            const usersResponse = await firstValueFrom(
+                this.httpService.get(`${env.ZENDESK_URL_USERS}`, {
+                    headers: {
+                        'Authorization': `Basic ${auth}`,
+                        'Content-Type': 'application/json',
+                    },
+                })
+            );
+            const zendeskUsers: User[] = usersResponse.data.users; // Renombrado para evitar conflicto con InternalUser
+
+            // 2. Obtener TODOS los tickets de Zendesk
+            // NOTA: No podemos filtrar por oficina aquí, la API de Zendesk no tiene ese concepto interno.
+            const ticketsResponse: AxiosResponse<{ tickets: TicketWithoutUser[] }> = await firstValueFrom(
+                this.httpService.get(`${env.ZENDESK_URL_TICKETS}`, {
+                    headers: {
+                        'Authorization': `Basic ${auth}`,
+                        'Content-Type': 'application/json',
+                    },
+                })
+            );
+            const allZendeskTickets = ticketsResponse.data.tickets;
+
+            // 3. Obtener TODAS las asignaciones de tickets INTERNAS
+            // NOTA: No filtramos por oficina aquí todavía, obtenemos todas para poder mapear.
+            const allTicketAssignments = await this.ticketAssignmentRepository.find({
+                relations: ['user'] // Cargar la relación con el usuario interno para acceder a su oficina
+            });
+
+            // Crear un mapa para búsqueda rápida de asignaciones por zendeskTicketId
+            const assignmentMap = new Map<string, TicketAssignment>();
+            allTicketAssignments.forEach(assignment => {
+                assignmentMap.set(assignment.zendeskTicketId, assignment);
+            });
+
+            // 4. Mapear tickets de Zendesk a TicketResponseDto y APLICAR EL FILTRO POR OFICINA
+            const filteredTickets: TicketResponseDto[] = [];
+
+            for (const ticket of allZendeskTickets) {
+                // Buscar la asignación interna para este ticket
+                const ticketAssignment = assignmentMap.get(ticket.id.toString());
+
+                // --- LÓGICA DE FILTRADO POR OFICINA ---
+                let includeTicket = true; // Por defecto, incluir el ticket
+
+                if (officeId) {
+                    // Si se requiere filtrar por oficina:
+                    // Solo incluir el ticket si tiene una asignación interna
+                    // Y el usuario asignado internamente pertenece a la oficina especificada.
+                    if (!ticketAssignment || !ticketAssignment.user || ticketAssignment.user.office !== officeId) {
+                        includeTicket = false; // No incluir si no hay asignación válida en la oficina
+                    }
+                }
+                // --- FIN LÓGICA DE FILTRADO POR OFICINA ---
+
+
+                if (includeTicket) {
+                    // Si el ticket debe ser incluido (cumple el filtro o no hay filtro)
+
+                    // Buscar usuario solicitante de Zendesk
+                    const requesterUser = zendeskUsers.find(user => user.id === ticket.requester_id);
+
+                    // Preparar la información del operador asignado interno (si existe y se cargó la relación)
+                    let internalAssignee = undefined;
+                    if (ticketAssignment && ticketAssignment.user) {
+                        internalAssignee = {
+                            id: ticketAssignment.user.id,
+                            username: ticketAssignment.user.username, // Asumiendo que tu User tiene username
+                            email: ticketAssignment.user.email
+                        };
+                    }
+
+                    // Mapear a TicketResponseDto
+                    filteredTickets.push({
+                        id: ticket.id,
+                        subject: ticket.subject,
+                        description: ticket.description,
+                        status: ticket.status,
+                        requester_id: ticket.requester_id,
+                        assignee_id: ticket.assignee_id, // ID del asignado en Zendesk
+                        user: requesterUser ? { // Información del solicitante de Zendesk
+                            name: requesterUser.name,
+                            email: requesterUser.email,
+                            // Puedes añadir más campos de ZendeskUser si los necesitas en el frontend
+                        } : undefined,
+                        group_id: ticket.group_id,
+                        custom_fields: ticket.custom_fields,
+                        internal_assignee: internalAssignee // Información del asignado INTERNO (desde TicketAssignment)
+                    });
+                }
+            }
+
+
+            console.log(`ZendeskService: Obtenidos ${filteredTickets.length} tickets` + (officeId ? ` filtrados para oficina ${officeId}` : ''));
+            return filteredTickets; // Devuelve la lista de tickets FILTRADA
+        } catch (error) {
+            this.logger.error(`Error fetching all tickets: ${error.message}`, error.stack);
+            throw new Error(`Error fetching tickets: ${error.message}`);
+        }
+    }
+
+    async getTicketAssignmentsForUserOffice(officeId: string): Promise<TicketAssignment[]> {
+        // Usamos el nuevo método findByOffice del repository
+        return this.ticketAssignmentRepository.findByOffice(officeId);
     }
 
     async createAgent(createAgentDto: CreateAgentDto): Promise<UserResponseDto> {
@@ -761,7 +873,7 @@ export class ZendeskService {
         }
     }
 
-    async getTicket(ticketId: string): Promise<TicketResponseDto> {
+    /* async getTicket(ticketId: string): Promise<TicketResponseDto> {
         const auth = Buffer.from(`${env.ZENDESK_EMAIL}/token:${env.ZENDESK_TOKEN}`).toString('base64');
 
         try {
@@ -809,7 +921,99 @@ export class ZendeskService {
         } catch (error) {
             throw new Error(`Error fetching ticket: ${error.response?.data || error.message}`);
         }
+    } */
+
+    private async getZendeskTicket(ticketId: string): Promise<Ticket | null> {
+        const auth = Buffer.from(`${env.ZENDESK_EMAIL}/token:${env.ZENDESK_TOKEN}`).toString('base64');
+        try {
+            const response: AxiosResponse<{ ticket: Ticket }> = await firstValueFrom(
+                this.httpService.get(`${env.ZENDESK_URL_TICKETS}/${ticketId}`, {
+                    headers: { 'Authorization': `Basic ${auth}` },
+                })
+            );
+            return response.data.ticket;
+        } catch (error) {
+            // No lanzar excepción aquí, solo registrar y devolver null
+            this.logger.error(`Failed to fetch ticket ${ticketId} from Zendesk API: ${error.message}`, error.stack);
+            return null;
+        }
     }
+
+    async getTicket(ticketId: string, officeId?: string): Promise<TicketResponseDto> { // <-- Aceptar officeId opcional
+        console.log(`ZendeskService: Obteniendo ticket ID ${ticketId}${officeId ? ` para oficina ${officeId}` : ''}`);
+
+        // 1. Obtener el ticket de Zendesk
+        const zendeskTicket = await this.getZendeskTicket(ticketId); // Método auxiliar para no repetir la llamada API
+
+        if (!zendeskTicket) {
+            throw new NotFoundException(`Ticket with ID ${ticketId} not found in Zendesk.`);
+        }
+
+        // 2. Obtener la asignación interna para este ticket (si existe)
+        const ticketAssignment = await this.ticketAssignmentRepository.findOne({
+            where: { zendeskTicketId: ticketId },
+            relations: ['user'] // Cargar la relación con el usuario interno
+        });
+
+        // 3. Verificar permiso por oficina si se proporciona officeId
+        if (officeId) {
+            // Si se requiere filtrar por oficina, el usuario solo puede ver este ticket si:
+            // Tiene una asignación interna Y el usuario asignado pertenece a la oficina especificada.
+            if (!ticketAssignment || !ticketAssignment.user || ticketAssignment.user.office !== officeId) {
+                // Lanzar NotFoundException (para no dar pistas de que el ticket existe en otra oficina)
+                throw new NotFoundException(`Ticket with ID ${ticketId} not found in office ${officeId}`);
+                // O lanzar UnauthorizedException si quieres ser más explícito
+                // throw new UnauthorizedException(`You do not have permission to view ticket ${ticketId}`);
+            }
+        }
+
+        // 4. Si el ticket fue encontrado y el usuario tiene permiso (o no se filtró), mapear y devolver
+        // Obtener la información del solicitante de Zendesk (si está disponible)
+        const auth = Buffer.from(`${env.ZENDESK_EMAIL}/token:${env.ZENDESK_TOKEN}`).toString('base64');
+        let requesterUser: User | undefined = undefined;
+        if (zendeskTicket.requester_id) {
+            try {
+                const userResponse = await firstValueFrom(
+                    this.httpService.get(`${env.ZENDESK_URL_USERS}/${zendeskTicket.requester_id}`, {
+                        headers: { 'Authorization': `Basic ${auth}` },
+                    })
+                );
+                requesterUser = userResponse.data.user;
+            } catch (userError) {
+                this.logger.warn(`Could not fetch requester user ${zendeskTicket.requester_id} for ticket ${ticketId}: ${userError.message}`);
+            }
+        }
+
+
+        // Preparar la información del operador asignado interno (si existe y se cargó la relación)
+        let internalAssignee = undefined;
+        if (ticketAssignment && ticketAssignment.user) {
+            internalAssignee = {
+                id: ticketAssignment.user.id,
+                username: ticketAssignment.user.username, // Asumiendo que tu User tiene username
+                email: ticketAssignment.user.email
+            };
+        }
+
+
+        return {
+            id: zendeskTicket.id,
+            subject: zendeskTicket.subject,
+            description: zendeskTicket.description,
+            status: zendeskTicket.status,
+            requester_id: zendeskTicket.requester_id,
+            assignee_id: zendeskTicket.assignee_id, // ID del asignado en Zendesk
+            user: requesterUser ? { // Información del solicitante de Zendesk
+                name: requesterUser.name,
+                email: requesterUser.email,
+                // Puedes añadir más campos de ZendeskUser si los necesitas en el frontend
+            } : undefined,
+            group_id: zendeskTicket.group_id,
+            custom_fields: zendeskTicket.custom_fields,
+            internal_assignee: internalAssignee // Información del asignado INTERNO (desde TicketAssignment)
+        };
+    }
+
 
     async getTicketComments(ticketId: string): Promise<CommentResponseDto[]> {
         const auth = Buffer.from(`${env.ZENDESK_EMAIL}/token:${env.ZENDESK_TOKEN}`).toString('base64');

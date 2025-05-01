@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthService } from './auth.service';
 import { UserModule } from '../users/user.module';
@@ -10,6 +10,10 @@ import { ApiKey } from './apikeys/entities/apikey.entity';
 import { ApiKeyGuard } from './apikeys/apikey.guard';
 import { ApiKeyService } from './apikeys/apikey.service';
 import { ApiKeyController } from './apikeys/apikey.controller';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
+import { JwtStrategy } from '../auth/strategies/jwt.strategy'; // <-- 1. Importa la Estrategia
 
 @Module({
   imports: [
@@ -17,17 +21,31 @@ import { ApiKeyController } from './apikeys/apikey.controller';
     ConfigModule,
     TypeOrmModule.forFeature([ApiKey]),
     ApiKeysModule,
-    ThrottlerModule.forRoot([{
-      ttl: 60 * 15, // 15 minutes
-      limit: 5, // 5 requests
-    }]),
+    // --- CONFIGURACIÓN JWT ---
+    PassportModule.register({ defaultStrategy: 'jwt' }), // Correcto
+    JwtModule.registerAsync({                           // Correcto
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET'),
+        signOptions: {
+          expiresIn: configService.get<string>('JWT_EXPIRATION', '3600s'),
+        },
+      }),
+      inject: [ConfigService],
+    }),
+    // --- FIN CONFIGURACIÓN JWT ---
+
+    ThrottlerModule.forRoot([{ ttl: 60 * 15, limit: 5 }]), // Correcto
   ],
   providers: [
     AuthService,
     ApiKeyGuard,
-    ApiKeyService
+    ApiKeyService,
+    JwtAuthGuard,
+    JwtStrategy,  // <--- 2. Añade la Estrategia a los providers
   ],
   controllers: [AuthController, ApiKeyController],
-  exports: [AuthService, ApiKeyGuard, ApiKeyService],
+  // Exporta lo necesario
+  exports: [AuthService, ApiKeyGuard, ApiKeyService, JwtAuthGuard, PassportModule, JwtModule],
 })
-export class AuthModule { } 
+export class AuthModule { }

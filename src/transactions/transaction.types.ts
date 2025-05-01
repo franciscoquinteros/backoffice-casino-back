@@ -1,3 +1,5 @@
+import { ApiProperty } from "@nestjs/swagger";
+
 export interface IpnNotification {
   topic: string;
   id: string;
@@ -38,6 +40,59 @@ export interface Transaction {
   idCliente?: string | number;
   reference_transaction?: string;
   relatedUserTransactionId?: string;
+  office?: string;
+}
+
+export class TransactionDto {
+  @ApiProperty({ example: '123456789' })
+  id: string | number;
+
+  @ApiProperty({ enum: ['deposit', 'withdraw'] })
+  type: 'deposit' | 'withdraw';
+
+  @ApiProperty({ example: 100.50 })
+  amount: number;
+
+  @ApiProperty({ example: 'Aceptado' })
+  status: string;
+
+  @ApiProperty({ example: '2025-05-01T12:00:00.000Z' })
+  date_created: string;
+
+  @ApiProperty({ example: 'Depósito de cliente' })
+  description: string;
+
+  @ApiProperty({ required: false })
+  payment_method_id?: string;
+
+  @ApiProperty({ required: false, example: 'payer@example.com' })
+  payer_email?: string;
+
+  // Si PayerIdentification es una clase/DTO también, úsala aquí
+  // Si es solo una interfaz, quizás necesites definirla como clase DTO también o anidarla
+  // @ApiProperty({ required: false, type: PayerIdentificationDto })
+  // payer_identification?: PayerIdentificationDto; // Asumiendo que creas PayerIdentificationDto
+
+  @ApiProperty({ required: false })
+  external_reference?: string;
+
+  @ApiProperty({ required: false })
+  cbu?: string;
+
+  @ApiProperty({ required: false })
+  wallet_address?: string;
+
+  @ApiProperty({ required: false })
+  receiver_id?: string;
+
+  @ApiProperty({ required: false })
+  idCliente?: string | number;
+
+  @ApiProperty({ required: false })
+  reference_transaction?: string;
+
+  @ApiProperty({ required: false, example: 'OFICINA_XYZ' })
+  office?: string;
 }
 
 export interface PaymentData {

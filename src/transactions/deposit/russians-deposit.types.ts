@@ -7,4 +7,6 @@ export interface RussiansDepositData {
   email?: string; // Añadido para soportar el email en los depósitos externos
   externalReference?: string;
   idTransaction?: string;
+  idAgent?: string;
+  payer_email?: string; // Añadido para soportar el email en los depósitos externos
 }

@@ -1,14 +1,16 @@
 import { forwardRef, Injectable, OnModuleInit, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindManyOptions, Repository } from 'typeorm';
 import axios from 'axios';
 import { IpnNotification, DepositData, Transaction, PaymentData } from './transaction.types';
+// Importamos RussiansDepositData (asumiendo que tiene idAgent)
 import { RussiansDepositData } from './deposit/russians-deposit.types';
 import { AccountService } from '../account/account.service';
 import { Account } from '../account/entities/account.entity';
 import { WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 import { TransactionEntity } from './entities/transaction.entity';
+// Importamos WithdrawData (asumiendo que también tiene idAgent)
 import { WithdrawData } from './withdraw/russianswithdraw.types';
 
 export { Transaction } from './transaction.types';
@@ -148,7 +150,8 @@ export class IpnService implements OnModuleInit {
       receiver_id: entity.receiverId,
       idCliente: entity.idCliente,
       reference_transaction: entity.referenceTransaction,
-      relatedUserTransactionId: entity.relatedUserTransactionId // De entidad a tipo
+      relatedUserTransactionId: entity.relatedUserTransactionId,
+      office: entity.office, // <-- Mapear el campo 'office'
     };
   }
 
@@ -172,6 +175,7 @@ export class IpnService implements OnModuleInit {
     entity.idCliente = transaction.idCliente?.toString() || null;
     entity.referenceTransaction = transaction.reference_transaction;
     entity.relatedUserTransactionId = transaction.relatedUserTransactionId;
+    entity.office = transaction.office || null; // <-- Mapear y guardar 'office'
     return entity;
   }
 
@@ -240,6 +244,31 @@ export class IpnService implements OnModuleInit {
 
     // Eliminar posibles duplicados
     return [...new Set(tokens)];
+  }
+
+  private isDateCloseEnough(date1Str: string | undefined, date2Str: string | undefined): boolean {
+    if (!date1Str || !date2Str) return false;
+    try {
+      const d1 = new Date(date1Str);
+      const d2 = new Date(date2Str);
+
+      // Verificar si las fechas son válidas
+      if (isNaN(d1.getTime()) || isNaN(d2.getTime())) {
+        console.warn(`isDateCloseEnough: Fechas inválidas recibidas: ${date1Str}, ${date2Str}`);
+        return false;
+      }
+
+      const diffMs = Math.abs(d1.getTime() - d2.getTime());
+      const diffHours = diffMs / (1000 * 60 * 60); // Diferencia en horas
+      const maxDiffHours = 24; // Tolerancia de 24 horas para transferencias ( configurable )
+
+      // console.log(`isDateCloseEnough: Comparando fechas: ${date1Str} vs ${date2Str}. Diferencia en horas: ${diffHours}. Tolerancia: ${maxDiffHours}`);
+
+      return diffHours <= maxDiffHours;
+    } catch (error) {
+      console.error(`Error en isDateCloseEnough al parsear fechas: ${date1Str}, ${date2Str}`, error);
+      return false; // Retornar false si hay error al parsear
+    }
   }
 
   // En IpnService (transactions.service.ts)
@@ -360,9 +389,11 @@ export class IpnService implements OnModuleInit {
     // Usamos el ID del pago de MP como ID de nuestra transacción
     const existingMpTx = await this.getTransactionById(apiData.id.toString());
 
-    mpTransaction = existingMpTx ? existingMpTx : { id: apiData.id.toString(), type: 'deposit' } as Transaction; // Usar existente o crear base
+    // Si ya existe, usarla para preservar los campos personalizados como relatedUserTransactionId
+    mpTransaction = existingMpTx ? existingMpTx : { id: apiData.id.toString(), type: 'deposit' } as Transaction;
 
-    // Actualizar datos de la transacción de MP con la info de la API
+
+    // Actualizar datos de la transacción de MP con la info fresca de la API
     mpTransaction.amount = apiData.transaction_amount || 0;
     mpTransaction.status = apiData.status || 'Pending'; // Estado reportado por MP
     mpTransaction.date_created = apiData.date_created;
@@ -374,6 +405,10 @@ export class IpnService implements OnModuleInit {
     mpTransaction.external_reference = apiData.external_reference || null;
     mpTransaction.receiver_id = apiData.collector_id?.toString() || apiData.receiver_id?.toString() || null;
     mpTransaction.cbu = cbuFromMp; // Asociar el CBU si se encontró la cuenta
+    // --- AÑADIR ASIGNACIÓN DE OFICINA AL MP Transaction si se encuentra la cuenta ---
+    // Esto es útil para poder filtrar las transacciones de MP por oficina receptora
+    mpTransaction.office = associatedAccount?.office || null; // <-- Asignar office de la cuenta receptora si está disponible
+
 
     // Si ya tenía relatedUserTransactionId (porque validateWithMercadoPago lo marcó), mantenerlo
     // mpTransaction.relatedUserTransactionId = existingMpTx?.relatedUserTransactionId || undefined; // Ya se copia si se carga el existente
@@ -382,7 +417,8 @@ export class IpnService implements OnModuleInit {
     const savedMpTransaction = await this.saveTransaction(mpTransaction); // mpTransaction ahora es la guardada
     // saveTransaction ya actualiza la lista en memoria
 
-    console.log(`[IPN] ${savedMpTransaction.id}: Transacción de MP guardada/actualizada con estado MP: ${savedMpTransaction.status}.`);
+    console.log(`[IPN] ${savedMpTransaction.id}: Transacción de MP guardada/actualizada con estado MP: ${savedMpTransaction.status}. Oficina: ${savedMpTransaction.office}`); // <-- Log office
+
 
     // --- INICIO LÓGICA DE VALIDACIÓN CRUZADA POR IPN ---
     let matchingUserDeposit: Transaction | undefined = undefined;
@@ -394,14 +430,17 @@ export class IpnService implements OnModuleInit {
       // Buscar un depósito de usuario pendiente (creado por validateWithMercadoPago)
       // que coincida con este pago de MP y que NO HAYA SIDO YA VALIDADO
       const matchingUserDeposit = this.transactions.find(userTx => {
+        // Asegurarse de que userTx es un depósito de usuario válido para matchear
         return (
           userTx.type === 'deposit' && // Debe ser un depósito reportado por el usuario
           userTx.status === 'Pending' && // Busca depósitos reportados por usuario que están pendientes
           !userTx.reference_transaction && // <--- ¡CLAVE! Asegura que este depósito pendiente NO haya sido validado ya por otro pago MP
+          typeof userTx.amount === 'number' && userTx.amount > 0 && // Asegurar monto válido en User Tx
           userTx.amount === savedMpTransaction.amount && // Mismo monto
-          // Verificar que el CBU del depósito de usuario corresponde al receptor del pago MP
-          this.matchCbuWithMp(savedMpTransaction, userTx.cbu) && // matchCbuWithMp puede manejar Transaction (MP)
-          savedMpTransaction.payer_email && userTx.payer_email && savedMpTransaction.payer_email.toLowerCase() === userTx.payer_email.toLowerCase() && // Mismo email del pagador (ignorando mayúsculas/minúsculas)
+          userTx.cbu && // Asegurar que el depósito de usuario tiene CBU
+          this.matchCbuWithMp(savedMpTransaction, userTx.cbu) && // El pago de MP llegó a la cuenta del CBU reportado por el usuario
+          savedMpTransaction.payer_email && userTx.payer_email && savedMpTransaction.payer_email.toLowerCase() === userTx.payer_email.toLowerCase() && // Mismo email del pagador (ignorando mayúsculas/minúsculas), asegurando que ambos emails existan
+          userTx.date_created && savedMpTransaction.date_created && // Asegurar que ambas fechas existan
           this.isDateCloseEnough(savedMpTransaction.date_created, userTx.date_created) // Fecha de creación cercana (del pago MP y del reporte de usuario)
         );
       });
@@ -460,219 +499,113 @@ export class IpnService implements OnModuleInit {
     };
   }
 
-  async getTransactions(): Promise<Transaction[]> {
-    try {
-      const entities = await this.transactionRepository.find({
-        order: { dateCreated: 'DESC' }
-      });
-
-      const transactions = entities.map(this.mapEntityToTransaction);
-      console.log(`Obtenidas ${transactions.length} transacciones desde la BD`);
-      return transactions;
-    } catch (error) {
-      console.error('Error al obtener transacciones desde BD:', error);
-      // Fallback al comportamiento anterior
-      console.log('Devolviendo transacciones en memoria como fallback:', this.transactions.length);
-      return this.transactions;
-    }
-  }
-
-  // Actualizar transacción (por ejemplo, al aceptar una transacción)
-  async updateTransactionStatus(id: string, status: string): Promise<Transaction | null> {
-    try {
-      // Actualizar en BD
-      await this.transactionRepository.update(id, { status });
-
-      // Obtener la transacción actualizada
-      const updatedEntity = await this.transactionRepository.findOne({ where: { id } });
-      if (!updatedEntity) {
-        return null;
-      }
-
-      // Actualizar en memoria
-      this.transactions = this.transactions.map(t =>
-        t.id.toString() === id ? this.mapEntityToTransaction(updatedEntity) : t
-      );
-
-      return this.mapEntityToTransaction(updatedEntity);
-    } catch (error) {
-      console.error(`Error al actualizar estado de transacción ${id}:`, error);
-      return null;
-    }
-  }
-
-  private mapCbuToMpIdentifier(cbu: string): string {
-    // Buscar en la lista de cuentas configuradas
-    // Asegurarse de que la cuenta esté activa, sea de mercadopago y tenga mp_client_id
-    const account = this.accounts.find(acc =>
-      acc.cbu === cbu &&
-      acc.wallet === 'mercadopago' &&
-      acc.status === 'active' &&
-      acc.mp_client_id // Asegurar que el campo necesario para el mapeo exista
-    );
-
-    if (account?.mp_client_id) {
-      // console.log(`mapCbuToMpIdentifier: CBU ${cbu} mapeado a mp_client_id ${account.mp_client_id}`);
-      return account.mp_client_id;
-    }
-
-    console.warn(`mapCbuToMpIdentifier: No se encontró un identificador mp_client_id configurado para el CBU: ${cbu}`);
-
-    // Mantener el mapeo estático como respaldo si es estrictamente necesario,
-    // pero es preferible que todos los CBU válidos estén en las cuentas configuradas.
-    const cbuMapping: { [key: string]: string } = {
-      // '00010101': 'TU_RECEIVER_ID', // Reemplaza con el receiver_id de tu cuenta MP si no está en Accounts
-      // Agrega más mapeos según tus cuentas si no están en Accounts
-    };
-    // return cbuMapping[cbu] || ''; // Si usas el mapeo estático de respaldo
-    return ''; // Si SOLO dependes de las cuentas configuradas
-  }
-
-  private isValidCbu(cbu: string): boolean {
-    // Para que un CBU sea válido para Mercado Pago en este contexto,
-    // debe estar configurado en una de nuestras cuentas activas de tipo mercadopago.
-    if (!cbu) {
-      console.warn('isValidCbu: CBU es nulo o vacío.');
-      return false;
-    }
-
-    const account = this.accounts.find(acc =>
-      acc.cbu === cbu &&
-      acc.wallet === 'mercadopago' &&
-      acc.status === 'active' && // Solo considerar cuentas activas
-      acc.mp_client_id // Asegurarse de que tenga el ID de cliente MP necesario para mapeo
-    );
-
-    if (!account) {
-      console.warn(`isValidCbu: No se encontró una cuenta activa de Mercado Pago configurada para el CBU: ${cbu}`);
-      // Puedes añadir aquí una verificación de formato básico de CBU si lo deseas,
-      // pero la validación principal es que corresponda a una cuenta configurada.
-      return false;
-    }
-
-    console.log(`isValidCbu: CBU ${cbu} validado contra cuenta configurada ${account.name} (ID: ${account.id}).`);
-    return true;
-  }
-
-  // Buscar cuenta por receiver_id de Mercado Pago
-  private findAccountByReceiverId(receiverId: string): Account | undefined {
-    return this.accounts.find(account =>
-      account.wallet === 'mercadopago' &&
-      (this.mapCbuToMpIdentifier(account.cbu) === receiverId ||
-        account.mp_client_id === receiverId)
-    );
-  }
-
-  private matchCbuWithMp(transaction: Transaction | PaymentData, cbu: string): boolean {
-    // Asegurarse de que la transacción tenga los campos necesarios
-    if (!('receiver_id' in transaction) || !transaction.receiver_id) {
-      // console.warn('matchCbuWithMp: Transacción no tiene receiver_id.');
-      return false;
-    }
-
-    // El payment_method_id no es estrictamente necesario para el matcheo CBU vs receiver_id,
-    // pero la lógica original lo incluía. Mantengámoslo si es parte del requisito.
-    // if (!transaction.payment_method_id) return false; // Depende de si siempre esperas payment_method_id
-
-    // Asegurarse de que el CBU del usuario sea válido
-    if (!cbu) {
-      // console.warn('matchCbuWithMp: CBU del usuario es nulo o vacío.');
-      return false;
-    }
-
-    const mappedCbuIdentifier = this.mapCbuToMpIdentifier(cbu);
-
-    // Si no pudimos mapear el CBU a un identificador de MP, no puede haber coincidencia
-    if (!mappedCbuIdentifier) {
-      // console.warn(`matchCbuWithMp: No se pudo mapear CBU ${cbu} a identificador de MP.`);
-      return false;
-    }
-
-
-
-
-    // Lógica de coincidencia: El identificador de MP del CBU debe coincidir con el receiver_id de la transacción de MP
-    const receiverIdMatch = mappedCbuIdentifier === transaction.receiver_id;
-
-    // Lógica adicional si el payment_method_id es 'cvu' (como estaba en tu código original)
-    // Esto podría ser redundante si el mapeo CBU -> receiver_id ya es suficiente.
-    // Lo mantengo como estaba, pero considera si esta parte es realmente necesaria para CVUs.
-    const cvuCheck = transaction.payment_method_id === 'cvu' && (transaction as Transaction).type === 'deposit'; // Asegurarse que solo aplica a depósitos de tipo Transaction
-
-
-    const isMatch = receiverIdMatch || cvuCheck;
-
-    // if (isMatch) {
-    //    console.log(`matchCbuWithMp: CBU ${cbu} (mapeado a ${mappedCbuIdentifier}) matchea con receiver_id ${transaction.receiver_id} (o check CVU).`);
-    // } else {
-    //    console.log(`matchCbuWithMp: CBU ${cbu} (mapeado a ${mappedCbuIdentifier}) NO matchea con receiver_id ${transaction.receiver_id}.`);
-    // }
-
-
-    return isMatch;
-  }
-
+  // Modificar validateWithMercadoPago para GUARDAR idAgent como 'office'
   async validateWithMercadoPago(depositData: RussiansDepositData) {
     const opId = `validate_${Date.now()}`;
     console.log(`[${opId}] INICIO: Validando depósito:`, JSON.stringify(depositData));
     console.log(`[${opId}] Email recibido para depósito:`, depositData.email);
     console.log('Validando depósito:', depositData);
     console.log('Email recibido para depósito:', depositData.email);
+    // Log para ver idAgent recibido
+    console.log(`[${opId}] idAgent recibido:`, depositData.idAgent); // <-- Log para ver idAgent recibido
 
-    // Mapear RussiansDepositData a DepositData
-    const depositToValidate: DepositData = {
-      cbu: depositData.cbu,
-      amount: depositData.amount,
-      idTransferencia: depositData.idTransaction || `deposit_${Date.now()}`, // Usar idTransaction como idTransferencia
-      dateCreated: depositData.dateCreated,
-      email: depositData.email,
-    };
 
-    // VALIDACIÓN DE CBU (Mantener)
-    if (!this.isValidCbu(depositToValidate.cbu)) {
-      console.warn(`[${opId}] Validación de CBU fallida: ${depositToValidate.cbu}`);
-      // Opcional: Crear transacción 'Rechazado' por CBU inválido
-      return { status: 'error', message: 'incorrect CBU', transaction: null }; // Devolver error si el CBU no es válido antes de crear la transacción
+    // Extraemos el idTransferencia del payload, usando fallback si es necesario
+    const idTransferencia = depositData.idTransaction || `deposit_${Date.now()}`;
+
+
+    // --- VALIDACIÓN DE CBU CON FILTRO DE OFICINA ---
+    // Pasar el CBU del payload Y el idAgent (oficina) a isValidCbu
+    if (!this.isValidCbu(depositData.cbu, depositData.idAgent)) { // <-- ¡PASAR depositData.idAgent AQUÍ!
+      console.warn(`[${opId}] Validación de CBU fallida para CBU ${depositData.cbu} en oficina ${depositData.idAgent}.`); // Log actualizado
+      // Crear transacción 'Rechazado' por CBU inválido si no existe ya con ese idTransferencia
+      const existingUserReport = await this.getTransactionById(idTransferencia);
+      if (existingUserReport) {
+        console.log(`[${opId}] El ID de transferencia ${idTransferencia} ya existe, devolviendo estado existente.`);
+        const responseStatus = (existingUserReport.status === 'Aceptado' || existingUserReport.status === 'Pending') ? 'success' : 'error';
+        const responseMessage = existingUserReport.status === 'Aceptado' ? 'Este depósito ya fue validado.' :
+          existingUserReport.status === 'Pending' ? 'Este depósito ya está registrado y pendiente.' :
+            'Error al registrar depósito: ID de transacción duplicado con estado de error.';
+        return { status: responseStatus, message: responseMessage, transaction: existingUserReport };
+      } else {
+        const rejectedTransaction: Transaction = {
+          id: idTransferencia,
+          type: 'deposit',
+          amount: depositData.amount,
+          status: 'Rechazado',
+          date_created: new Date().toISOString(),
+          description: 'Depósito rechazado: CBU inválido o no configurado para esta oficina.', // Mensaje más específico
+          cbu: depositData.cbu,
+          idCliente: depositData.idCliente,
+          payer_email: depositData.email, // Si usas este campo en tu DTO
+          external_reference: depositData.idTransaction,
+          office: depositData.idAgent, // <-- GUARDAR idAgent como 'office'
+        };
+        await this.saveTransaction(rejectedTransaction);
+        return { status: 'error', message: 'El CBU proporcionado no es válido o no está configurado para esta oficina.', transaction: rejectedTransaction }; // Mensaje más específico
+      }
     }
-
-    // VERIFICAR SI EL idTransferencia (ID DEL USUARIO) YA EXISTE EN NUESTRO SISTEMA
-    const existingUserReport = await this.getTransactionById(depositToValidate.idTransferencia);
-    if (existingUserReport) {
-      console.log(`[${opId}] El ID de transferencia ${depositToValidate.idTransferencia} ya existe. Devolviendo información existente.`);
-      // Devolver la transacción existente en lugar de crear una nueva
-      return {
-        status: existingUserReport.status === 'Aceptado' ? 'success' : 'pending', // Ajustar el status de la respuesta
-        message: existingUserReport.status === 'Aceptado' ? 'Este depósito ya fue validado.' : 'Este depósito ya está registrado y pendiente.',
-        transaction: existingUserReport
-      };
-    }
+    // --- FIN VALIDACIÓN DE CBU CON FILTRO DE OFICINA ---
 
 
-    // Crear la transacción DEL USUARIO y guardarla en BD inmediatamente con estado PENDING
-    const userDepositTransaction: Transaction = {
-      id: depositToValidate.idTransferencia, // Usamos el ID proporcionado por el usuario
+    // Si llegamos aquí, el CBU es válido para la oficina especificada y el idTransferencia no existía previamente (o existía pero no en estado Error/Rechazado)
+    // Creamos o actualizamos la transacción del usuario como PENDING
+
+
+    const existingPendingOrAcceptedUserReport = await this.getTransactionById(idTransferencia);
+
+    const userDepositTransaction: Transaction = existingPendingOrAcceptedUserReport ? existingPendingOrAcceptedUserReport : {
+      id: idTransferencia, // Usamos el ID proporcionado por el usuario
       type: 'deposit',
-      amount: depositToValidate.amount,
-      status: 'Pending', // Inicialmente siempre es Pendiente al reportar el usuario
-      date_created: depositToValidate.dateCreated || new Date().toISOString(),
-      description: 'Depósito reportado por usuario, pendiente de validación',
-      cbu: depositToValidate.cbu,
+      amount: depositData.amount,
+      status: 'Pending', // Inicialmente siempre es Pendiente al reportar el usuario (o se mantiene si ya era Pending/Aceptado)
+      date_created: depositData.dateCreated || new Date().toISOString(),
+      description: existingPendingOrAcceptedUserReport?.description || 'Depósito reportado por usuario, pendiente de validación', // Mantiene desc existente si actualiza
+      cbu: depositData.cbu, // Mantenemos el CBU guardado
       idCliente: depositData.idCliente,
-      payer_email: depositData.email,
+      payer_email: depositData.email, // O depositData.email si usas ese campo
       external_reference: depositData.idTransaction, // Referencia al ID del usuario
-      // Los campos reference_transaction y relatedUserTransactionId se establecen si se encuentra un match
+      office: depositData.idAgent, // <-- GUARDAR idAgent como 'office'
+      // reference_transaction y relatedUserTransactionId se mantienen si ya estaban, o se establecen si se encuentra match
     };
 
-    console.log(`[${opId}] Creando transacción de usuario con estado inicial PENDING:`, userDepositTransaction);
+    // Si ya existía y estaba Aceptado, no la volvemos a Pendiente
+    if (existingPendingOrAcceptedUserReport?.status === 'Aceptado') {
+      userDepositTransaction.status = 'Aceptado';
+      userDepositTransaction.description = existingPendingOrAcceptedUserReport.description; // No cambiar descripción si ya estaba Aceptado
+    } else {
+      userDepositTransaction.status = 'Pending'; // Si no existía o era Pending/otro, establecer como Pending
+    }
+
+
+    console.log(`[${opId}] Creando/Actualizando transacción de usuario con estado: ${userDepositTransaction.status} (ID: ${userDepositTransaction.id}) en oficina: ${userDepositTransaction.office}`, userDepositTransaction); // <-- Log office
     // saveTransaction ya actualiza la lista en memoria si la transacción existe, o la añade si es nueva
     const savedUserTransaction = await this.saveTransaction(userDepositTransaction);
 
 
+    // Si la transacción del usuario ya estaba Aceptada, no necesitamos buscar un match de nuevo.
+    if (savedUserTransaction.status === 'Aceptado') {
+      console.log(`[${opId}] Depósito de usuario ${savedUserTransaction.id} ya estaba Aceptado.`);
+      return {
+        status: 'success',
+        message: 'Este depósito ya fue validado.',
+        transaction: savedUserTransaction
+      };
+    }
+
+
     // --- INICIO LÓGICA DE BÚSQUEDA INMEDIATA DE PAGO MP ---
-    console.log(`[${opId}] Buscando un pago de Mercado Pago existente (local o API) y sin usar para matchear...`);
+    // Ahora buscamos un PAGO MP que matchee (Monto, CBU, Fecha) y no esté usado,
+    // para validar el depósito del usuario que acabamos de guardar como Pending.
+    // Se elimina el matching por email.
+    console.log(`[${opId}] Buscando un pago de Mercado Pago existente (local o API) y sin usar para matchear depósito pendiente ${savedUserTransaction.id} (sin email)...`);
 
     let matchedMpPayment: Transaction | PaymentData | undefined = undefined;
     let matchedFromApi = false; // Bandera para saber si el match vino de la API
+
+    // Obtenemos un token para poder consultar la API si es necesario.
+    // Intentamos usar el token asociado al CBU del usuario si existe, o uno cualquiera si no.
+    const tokenForApiSearch = this.getAccessTokenByCbu(savedUserTransaction.cbu) || this.getAllAccessTokens()[0];
 
 
     // 1. Buscar en las transacciones locales (recibidas previamente por IPN)
@@ -680,13 +613,15 @@ export class IpnService implements OnModuleInit {
       // Buscamos una transacción que represente un pago de Mercado Pago procesado
       return (
         mpTx.type === 'deposit' && // Es una transacción de tipo 'deposit' (originada por MP IPN)
-        // NOTA: mpTx.status aquí es el status reportado por Mercado Pago ('approved', 'pending', etc.)
         (mpTx.status === 'Aceptado' || mpTx.status === 'approved') && // Solo pagos que MP reporta como aprobados/aceptados
-        !mpTx.relatedUserTransactionId && // <--- ¡CLAVE! Que NO haya validado ya otro depósito de usuario
-        mpTx.amount === savedUserTransaction.amount && // Mismo monto que el depósito del usuario
+        !mpTx.relatedUserTransactionId && // Que NO haya validado ya otro depósito de usuario
+        typeof mpTx.amount === 'number' && mpTx.amount > 0 && // Asegurar monto válido en MP Tx
+        mpTx.amount === savedUserTransaction.amount && // Mismo monto
+        savedUserTransaction.cbu && // Asegurar que el depósito de usuario tiene CBU
         this.matchCbuWithMp(mpTx, savedUserTransaction.cbu) && // El pago de MP llegó a la cuenta del CBU reportado por el usuario
-        mpTx.payer_email && savedUserTransaction.payer_email && mpTx.payer_email.toLowerCase() === savedUserTransaction.payer_email.toLowerCase() && // Mismo email del pagador (ignorando mayúsculas/minúsculas)
-        this.isDateCloseEnough(mpTx.date_created, savedUserTransaction.date_created) // Fecha de creación cercana (dentro de la tolerancia)
+        // mpTx.payer_email && savedUserTransaction.payer_email && mpTx.payer_email.toLowerCase() === savedUserTransaction.payer_email.toLowerCase() && // <-- VALIDACIÓN POR EMAIL ELIMINADA
+        mpTx.date_created && savedUserTransaction.date_created && // Asegurar que ambas fechas existan
+        this.isDateCloseEnough(mpTx.date_created, savedUserTransaction.date_created) // Fecha de creación cercana (del pago MP y del reporte de usuario)
       );
     });
 
@@ -698,15 +633,15 @@ export class IpnService implements OnModuleInit {
     } else {
       // 2. Si no hay coincidencia local de un pago MP *aprobado y sin usar*, consultar la API de MP
       console.log(`[${opId}] No hay coincidencia local disponible. Consultando API de Mercado Pago para pagos aprobados recientes...`);
-      const tokenToUse = this.getAccessTokenByCbu(savedUserTransaction.cbu) || this.getAllAccessTokens()[0];
 
-      if (tokenToUse) {
+
+      if (tokenForApiSearch) {
         try {
           const response = await axios.get(`https://api.mercadopago.com/v1/payments`, {
-            headers: { 'Authorization': `Bearer ${tokenToUse}` },
-            // Buscamos los últimos pagos aprobados. El limite puede ajustarse.
-            // Se podría añadir `external_reference` o algún otro filtro si Mercado Pago lo soporta y es relevante.
-            params: { status: 'approved', limit: 20 }, // Aumentado el límite por si acaso
+            headers: { 'Authorization': `Bearer ${tokenForApiSearch}` },
+            // No podemos filtrar por oficina aquí, la API de MP no tiene ese concepto.
+            // La validación por CBU/receiver_id en matchCbuWithMp ayudará a limitar los resultados relevantes.
+            params: { status: 'approved', limit: 20 }, // Buscar los últimos 20 pagos aprobados
           });
 
           console.log(`[${opId}] Respuesta de búsqueda en API de Mercado Pago: ${response.data.results.length} resultados.`);
@@ -715,10 +650,13 @@ export class IpnService implements OnModuleInit {
           const matchingApiPayment = apiPayments.find((apiPayment: PaymentData) => {
             // Reusamos la lógica de matching con los datos de la API
             const isMatch = (
-              apiPayment.amount === savedUserTransaction.amount &&
+              typeof apiPayment.amount === 'number' && apiPayment.amount > 0 && // Asegurar monto válido en API Payment
+              apiPayment.amount === savedUserTransaction.amount && // MISMO MONTO
+              savedUserTransaction.cbu && // Asegurar que el depósito de usuario tiene CBU
               this.matchCbuWithMp(apiPayment, savedUserTransaction.cbu) && // matchCbuWithMp puede manejar PaymentData
-              apiPayment.payer_email && savedUserTransaction.payer_email && apiPayment.payer_email.toLowerCase() === savedUserTransaction.payer_email.toLowerCase() &&
-              this.isDateCloseEnough(apiPayment.date_created, savedUserTransaction.date_created)
+              // apiPayment.payer_email && savedUserTransaction.payer_email && apiPayment.payer_email.toLowerCase() === savedUserTransaction.payer_email.toLowerCase() && // <-- VALIDACIÓN POR EMAIL ELIMINADA
+              apiPayment.date_created && savedUserTransaction.date_created && // Asegurar que ambas fechas existan
+              this.isDateCloseEnough(apiPayment.date_created, savedUserTransaction.date_created) // FECHA CERCANA
             );
 
             // Adicionalmente, verificar si este pago de la API ya fue usado localmente para validar
@@ -762,7 +700,7 @@ export class IpnService implements OnModuleInit {
 
       // 2. Establecer la referencia al ID del pago de Mercado Pago en el depósito del usuario
       const updateInfo: any = {
-        referenceTransaction: matchedMpPayment.id, // En la transacción del usuario, guardamos el ID del pago MP
+        referenceTransaction: matchedMpPayment.id.toString(), // En la transacción del usuario, guardamos el ID del pago MP (asegurar string)
         description: `Depósito validado automáticamente con MP Pago ID: ${matchedMpPayment.id}`
       };
       // Copiar algunos datos del pago MP a la transacción del usuario si son más precisos o faltan
@@ -771,12 +709,13 @@ export class IpnService implements OnModuleInit {
       if ('payment_method_id' in matchedMpPayment && matchedMpPayment.payment_method_id) updateInfo.paymentMethodId = matchedMpPayment.payment_method_id;
       // Podrías copiar otros campos relevantes aquí si los necesitas en la transacción del usuario
       // if ('date_approved' in matchedMpPayment) updateInfo.dateApproved = matchedMpPayment.date_approved; // Si tu TransactionEntity tiene dateApproved
+      if ('receiver_id' in matchedMpPayment && matchedMpPayment.receiver_id) updateInfo.receiverId = matchedMpPayment.receiver_id.toString(); // Copiar el receiver_id del pago MP
 
       await this.updateTransactionInfo(savedUserTransaction.id.toString(), updateInfo);
 
       // 3. Marcar el pago de Mercado Pago como 'usado' si lo encontramos localmente
-      //    Si el match fue de la API, la IPN posterior (procesada por handleNotification)
-      //    se encargará de marcar la transacción de MP como usada.
+      //    Si el match fue de la API, la IPN posterior (procesada por handleNotification)
+      //    se encargará de marcar la transacción de MP como usada.
       if (!matchedFromApi && 'id' in matchedMpPayment) { // Si el match fue local (ya tenemos el objeto Transaction completo)
         await this.updateTransactionInfo(matchedMpPayment.id.toString(), {
           relatedUserTransactionId: savedUserTransaction.id.toString(), // En la transacción de MP, guardamos el ID del depósito de usuario
@@ -802,7 +741,6 @@ export class IpnService implements OnModuleInit {
         message: 'Depósito validado automáticamente al instante.',
         transaction: updatedUserTransaction // Devuelve la transacción del usuario Aceptada
       };
-
     } else {
       console.log(`[${opId}] No se encontró pago de Mercado Pago existente y sin usar coincidente. El depósito ${savedUserTransaction.id} queda PENDING.`);
       // Si no se encontró un pago de MP ya registrado que coincida y no esté usado,
@@ -825,8 +763,11 @@ export class IpnService implements OnModuleInit {
 
   }
 
-  async validateWithdraw(withdrawData: WithdrawData) {
+  // Modificar validateWithdraw para GUARDAR idAgent como 'office'
+  async validateWithdraw(withdrawData: WithdrawData) { // Asumimos que WithdrawData ahora tiene idAgent
     console.log('Validando retiro:', withdrawData);
+    // Log para ver idAgent recibido
+    console.log(`Validando retiro idAgent: ${withdrawData.idAgent}`); // <-- Log para ver idAgent recibido
 
     // Generar un ID único o usar el proporcionado
     const transactionId = withdrawData.idTransaction || `withdraw_${Date.now()}`;
@@ -841,23 +782,24 @@ export class IpnService implements OnModuleInit {
       wallet_address: withdrawData.wallet_address,
       payment_method_id: withdrawData.withdraw_method,
       idCliente: withdrawData.idCliente,
-      payer_email: withdrawData.email,
-      payer_id: withdrawData.idCliente,
+      payer_email: withdrawData.email, // El email del usuario que solicita el retiro
+      payer_id: withdrawData.idCliente, // Usamos el idCliente como payer_id para retiros
       // Agregar los campos adicionales
       payer_identification: {
         type: 'name',
         number: withdrawData.name
       },
-      external_reference: withdrawData.phoneNumber // Usar phoneNumber como referencia externa
+      external_reference: withdrawData.phoneNumber, // Usar phoneNumber como referencia externa
+      office: withdrawData.idAgent, // <-- GUARDAR idAgent como 'office'
     };
 
-    console.log('Creando transacción de retiro:', newTransaction);
+    console.log('Creando transacción de retiro con office:', newTransaction.office, newTransaction); // <-- Log office
 
     // Guardar en BD y agregar a memoria
     const savedTransaction = await this.saveTransaction(newTransaction);
-    this.transactions.push(savedTransaction);
+    // saveTransaction ya agrega a this.transactions si no existe
 
-    console.log('Retiro almacenado:', savedTransaction);
+    console.log('Retiro almacenado con office:', savedTransaction.office, savedTransaction); // <-- Log office
 
     return {
       status: 'success',
@@ -867,15 +809,176 @@ export class IpnService implements OnModuleInit {
   }
 
 
+  // Modificar getTransactions para filtrar DIRECTAMENTE por 'office'
+  async getTransactions(officeId?: string): Promise<Transaction[]> { // <-- Aceptar officeId opcional
+    console.log(`IpnService: Buscando transacciones${officeId ? ` para oficina ${officeId}` : ''}`);
+
+    // Construir las opciones de búsqueda
+    const findOptions: FindManyOptions<TransactionEntity> = {
+      order: { dateCreated: 'DESC' }, // Ordenar por fecha descendente
+    };
+
+    // Si se proporciona officeId, añadir la condición WHERE directa en el campo 'office'
+    // TypeORM automáticamente gestiona { office: officeId } para buscar en la columna 'office'
+    if (officeId) {
+      findOptions.where = { office: officeId }; // <-- Filtrar DIRECTAMENTE por el campo 'office'
+    }
+    // Si officeId no se proporciona, findOptions.where será undefined, y find() traerá todo (si se permite a un superadmin por ejemplo)
+    // O podrías lanzar un error si officeId es obligatorio siempre:
+    // if (!officeId) { throw new Error("Filtering by officeId is required"); }
+    // findOptions.where = { office: officeId };
+
+    // Ejecutar la consulta y obtener los resultados
+    // TypeORM find() ya devuelve TransactionEntity[]
+    const entities = await this.transactionRepository.find(findOptions);
+
+    // Mapear las entidades obtenidas al tipo Transaction si es necesario (si mapEntityToTransaction hace transformaciones)
+    // Si solo mapea 1:1, puedes devolver entities directamente si el tipo Transaction es igual a TransactionEntity
+    // Asumiendo que mapEntityToTransaction mapea correctamente los campos
+    const transactions = entities.map(entity => this.mapEntityToTransaction(entity)); // Mantengo el mapeo
+
+    console.log(`IpnService: Obtenidas ${transactions.length} transacciones` + (officeId ? ` para oficina ${officeId}` : ''));
+    return transactions; // Devuelve Transaction[]
+  }
+
+
+  // Actualizar transacción (por ejemplo, al aceptar una transacción)
+  async updateTransactionStatus(id: string, status: string): Promise<Transaction | null> {
+    try {
+      // Actualizar en BD
+      await this.transactionRepository.update(id, { status });
+
+      // Obtener la transacción actualizada
+      const updatedEntity = await this.transactionRepository.findOne({ where: { id } });
+      if (!updatedEntity) {
+        return null;
+      }
+
+      // Actualizar en memoria
+      this.transactions = this.transactions.map(t =>
+        t.id.toString() === id ? this.mapEntityToTransaction(updatedEntity) : t
+      );
+
+      return this.mapEntityToTransaction(updatedEntity);
+    } catch (error) {
+      console.error(`Error al actualizar estado de transacción ${id}:`, error);
+      return null;
+    }
+  }
+
+  private mapCbuToMpIdentifier(cbu: string): string {
+    // Buscar en la lista de cuentas configuradas
+    // Asegurarse de que la cuenta esté activa, sea de mercadopago y tenga mp_client_id
+    const account = this.accounts.find(acc =>
+      acc.cbu === cbu &&
+      acc.wallet === 'mercadopago' &&
+      acc.status === 'active' && // Solo considerar cuentas activas
+      acc.mp_client_id // Asegurarse de que tenga el ID de cliente MP necesario para mapeo
+    );
+
+    if (account?.mp_client_id) {
+      // console.log(`mapCbuToMpIdentifier: CBU ${cbu} mapeado a mp_client_id ${account.mp_client_id}`);
+      return account.mp_client_id;
+    }
+
+    console.warn(`mapCbuToMpIdentifier: No se encontró un identificador mp_client_id configurado para el CBU: ${cbu}`);
+
+    // Mantener el mapeo estático como respaldo si es estrictamente necesario,
+    // but it's preferable that all valid CBUs are in the configured accounts.
+    const cbuMapping: { [key: string]: string } = {
+      // '00010101': 'TU_RECEIVER_ID', // Reemplaza con el receiver_id de tu cuenta MP if not in Accounts
+      // Add more mappings based on your accounts if they are not in Accounts
+    };
+    // return cbuMapping[cbu] || ''; // Si usas el mapeo estático de respaldo
+    return ''; // If you ONLY rely on configured accounts
+  }
+
+  private isValidCbu(cbu: string, officeId?: string): boolean { // <-- Accept optional officeId
+    // For a CBU to be valid for Mercado Pago in this context,
+    // it must be configured in one of our active Mercado Pago accounts, AND belong to the specified office (agent).
+    if (!cbu) {
+      console.warn('isValidCbu: CBU is null or empty.');
+      return false;
+    }
+
+    console.log(`isValidCbu: Buscando cuenta para CBU ${cbu}${officeId ? ` en oficina ${officeId}` : ''}`); // Log
+
+    // Buscar la cuenta que coincida con CBU, wallet, status, mp_client_id Y officeId (en la propiedad 'agent')
+    const account = this.accounts.find(acc =>
+      acc.cbu === cbu &&
+      acc.wallet === 'mercadopago' &&
+      acc.status === 'active' && // Only consider active accounts
+      acc.mp_client_id && // Ensure it has the necessary MP client ID for mapping
+      (!officeId || acc.agent === officeId) // <-- ¡CORRECCIÓN! Usar acc.agent en lugar de acc.office
+      // Si officeId no se proporciona, esta condición es true. Si se proporciona, acc.agent must match.
+    );
+
+    if (!account) {
+      console.warn(`isValidCbu: No se encontró una cuenta activa de Mercado Pago configurada para el CBU: ${cbu}${officeId ? ` en oficina ${officeId}` : ''}`); // Log
+      // You can add a basic CBU format check here if you want,
+      // but the main validation is that it corresponds to a configured account in the office.
+      return false;
+    }
+
+    console.log(`isValidCbu: CBU ${cbu} validado contra cuenta configurada ${account.name} (ID: ${account.id}) en oficina ${account.agent}.`); // Log (usar acc.agent en log también)
+    return true;
+  }
+
+  // Buscar cuenta por receiver_id de Mercado Pago
+  private findAccountByReceiverId(receiverId: string): Account | undefined {
+    return this.accounts.find(account =>
+      account.wallet === 'mercadopago' &&
+      (this.mapCbuToMpIdentifier(account.cbu) === receiverId ||
+        account.mp_client_id === receiverId)
+    );
+  }
+
+  private matchCbuWithMp(transaction: Transaction | PaymentData, cbu: string): boolean {
+    // Asegurarse de que la transacción tenga los campos necesarios
+    if (!('receiver_id' in transaction) || !transaction.receiver_id) {
+      // console.warn('matchCbuWithMp: Transacción no tiene receiver_id.');
+      return false;
+    }
+
+    // El payment_method_id no es estrictamente necesario para el matcheo CBU vs receiver_id,
+    // but the original logic included it. Let's keep it if it's part of the requirement.
+    // if (!transaction.payment_method_id) return false; // Depends on if you always expect payment_method_id
+
+    // Asegurarse de que el CBU del user is valid
+    if (!cbu) {
+      // console.warn('matchCbuWithMp: CBU del user is null or empty.');
+      return false;
+    }
+
+    const mappedCbuIdentifier = this.mapCbuToMpIdentifier(cbu);
+
+    // If we couldn't map the CBU to an MP identifier, there can be no match
+    if (!mappedCbuIdentifier) {
+      // console.warn(`mapCbuToMpIdentifier: Could not map CBU ${cbu} to MP identifier.`);
+      return false;
+    }
 
 
 
-  private isDateCloseEnough(date1: string | undefined, date2: string | undefined): boolean {
-    if (!date1 || !date2) return false;
-    const d1 = new Date(date1);
-    const d2 = new Date(date2);
-    const diffMs = Math.abs(d1.getTime() - d2.getTime());
-    const diffHours = diffMs / (1000 * 60 * 60); // Diferencia en horas
-    return diffHours <= 24; // Tolerancia de 24 horas para transferencias
+
+    // Matching logic: The MP identifier of the CBU must match the receiver_id of the MP transaction
+    const receiverIdMatch = mappedCbuIdentifier === transaction.receiver_id;
+
+    // Additional logic if the payment_method_id is 'cvu' (as it was in your original code)
+    // This might be redundant if the CBU -> receiver_id mapping is already sufficient.
+    // I'm keeping it as it was, but consider if this part is really necessary for CVUs.
+    const cvuCheck = transaction.payment_method_id === 'cvu' && (transaction as Transaction).type === 'deposit'; // Ensure it only applies to Transaction type deposits
+
+
+    const isMatch = receiverIdMatch || cvuCheck;
+
+    // if (isMatch) {
+    //    console.log(`matchCbuWithMp: CBU ${cbu} (mapped to ${mappedCbuIdentifier}) matches receiver_id ${transaction.receiver_id} (or CVU check).`);
+    // } else {
+    //    console.log(`matchCbuWithMp: CBU ${cbu} (mapped to ${mappedCbuIdentifier}) DOES NOT match receiver_id ${transaction.receiver_id}.`);
+    // }
+
+
+    return isMatch;
   }
 }

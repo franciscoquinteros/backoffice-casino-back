@@ -1,14 +1,25 @@
-import { Controller, Post, Body, Get, Param, Put, Query, Delete, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Put, Query, Delete, HttpException, HttpStatus, UnauthorizedException, Req, ForbiddenException, Logger } from '@nestjs/common';
 import { ZendeskService } from './zendesk.service';
 import { ApiOperation, ApiTags, ApiBody, ApiResponse } from '@nestjs/swagger';
-import { CreateTicketDto, ChangeTicketStatusDto, AssignTicketDto, TicketResponseDto, CommentResponseDto, UserResponseDto, GroupMembershipResponseDto, ChatMessageResponseDto, ChatMessageDto, ChatConversationResponseDto, CreateAgentDto } from './dto/zendesk.dto';
+import { CreateTicketDto, ChangeTicketStatusDto, AssignTicketDto, TicketResponseDto, CommentResponseDto, UserResponseDto, CreateAgentDto } from './dto/zendesk.dto';
 import { ApiKeyAuth } from '../auth/apikeys/decorators/api-key-auth.decorator';
 import { API_PERMISSIONS } from '../auth/apikeys/permissions.constants';
+
+interface AuthenticatedUser {
+    id: string | number;
+    office: string; // Campo de oficina
+    role?: string;
+}
+
+interface RequestWithUser extends Request {
+    user?: AuthenticatedUser;
+}
 
 @ApiTags('Zendesk')
 @Controller('zendesk')
 export class ZendeskController {
-    logger: any;
+    private readonly logger = new Logger(ZendeskController.name);
+    
     constructor(private readonly zendeskService: ZendeskService) { }
 
     @Post('create-ticket')
@@ -42,11 +53,7 @@ export class ZendeskController {
         group_id?: number;
     }) {
         try {
-            return await this.zendeskService.createContributor({
-                name: createContributorDto.name,
-                email: createContributorDto.email,
-                group_id: createContributorDto.group_id
-            });
+            return await this.zendeskService.createContributor(createContributorDto);
         } catch (error) {
             throw new HttpException(
                 `Failed to create contributor: ${error.message}`,
@@ -58,15 +65,13 @@ export class ZendeskController {
     @Post('team-members')
     async createTeamMember(@Body() createTeamMemberDto: any) {
         try {
-            // Primero, verificar los límites de la cuenta
+            // Verificar los límites de la cuenta
             const limits = await this.zendeskService.checkAccountLimits();
 
-            // Si hay una recomendación específica, registrarla
             if (limits.recommendedAction) {
                 this.logger.log(`Account limits check: ${limits.recommendedAction}`);
             }
 
-            // Crear el miembro del equipo usando el nuevo método
             return await this.zendeskService.createTeamMember({
                 name: createTeamMemberDto.name,
                 email: createTeamMemberDto.email,
@@ -81,7 +86,6 @@ export class ZendeskController {
     }
 
     @Delete('agents/:userId')
-    //@ApiKeyAuth(API_PERMISSIONS.ZENDESK_DELETE_AGENT) // Nuevo permiso
     @ApiOperation({ summary: 'Delete a Zendesk agent by ID' })
     @ApiResponse({ status: 200, description: 'Agent deleted successfully', type: Object })
     async deleteAgent(@Param('userId') userId: string) {
@@ -96,23 +100,71 @@ export class ZendeskController {
     }
 
     @Get('tickets/all')
-    @ApiOperation({ summary: 'Get all tickets with user information' })
-    @ApiResponse({ type: [TicketResponseDto] })
-    async getAllTickets() {
-        return this.zendeskService.getAllTickets();
+    @ApiOperation({ summary: 'Get all tickets (filtered by user office via internal assignment)' })
+    @ApiResponse({ status: 200, description: 'List of tickets for the user\'s office', type: [TicketResponseDto] })
+    @ApiResponse({ status: 401, description: 'Unauthorized' })
+    @ApiResponse({ status: 403, description: 'Forbidden / User office missing' })
+    async getAllTickets(@Req() request: RequestWithUser): Promise<TicketResponseDto[]> {
+        const user = request.user;
+        const userOfficeId = user?.office;
+
+        if (!userOfficeId) {
+            this.logger.error(`User ${user?.id} is missing office information.`);
+            throw new ForbiddenException("User office information is missing.");
+        }
+        
+        this.logger.log(`Fetching all tickets for office: ${userOfficeId}`);
+
+        // El servicio filtrará los tickets por oficina
+        return this.zendeskService.getAllTickets(userOfficeId);
     }
 
     @Get('tickets/:ticketId')
-    @ApiOperation({ summary: 'Get a ticket by ID' })
-    @ApiResponse({ type: TicketResponseDto })
-    async getTicket(@Param('ticketId') ticketId: string) {
-        return this.zendeskService.getTicket(ticketId);
+    @ApiOperation({ summary: 'Get a ticket by ID (filtered by user office)' })
+    @ApiResponse({
+        status: 200,
+        description: 'The ticket, if it has an internal assignment in the user\'s office',
+        type: TicketResponseDto
+    })
+    @ApiResponse({
+        status: 404,
+        description: 'Ticket not found or does not have an internal assignment in the user\'s office'
+    })
+    async getTicket(
+        @Param('ticketId') ticketId: string,
+        @Req() request: RequestWithUser
+    ): Promise<TicketResponseDto> {
+        const user = request.user;
+        const userOfficeId = user?.office;
+        
+        if (!userOfficeId) {
+            throw new ForbiddenException("User office information is missing.");
+        }
+        
+        this.logger.log(`Fetching ticket ${ticketId} for office: ${userOfficeId}`);
+        
+        // El servicio verificará si el ticket pertenece a la oficina del usuario
+        return this.zendeskService.getTicket(ticketId, userOfficeId);
     }
 
     @Get('tickets/:ticketId/comments')
     @ApiOperation({ summary: 'Get the comments of a ticket' })
     @ApiResponse({ type: [CommentResponseDto] })
-    async getTicketComments(@Param('ticketId') ticketId: string) {
+    async getTicketComments(
+        @Param('ticketId') ticketId: string,
+        @Req() request: RequestWithUser
+    ) {
+        const user = request.user;
+        const userOfficeId = user?.office;
+        
+        if (!userOfficeId) {
+            throw new ForbiddenException("User office information is missing.");
+        }
+        
+        // Primero verificamos si el usuario tiene acceso al ticket
+        await this.zendeskService.getTicket(ticketId, userOfficeId);
+        
+        // Si no se lanzó una excepción, el usuario tiene acceso
         return this.zendeskService.getTicketComments(ticketId);
     }
 
@@ -121,30 +173,52 @@ export class ZendeskController {
     @ApiResponse({ type: TicketResponseDto })
     async changeTicketStatus(
         @Param('ticketId') ticketId: string,
-        @Body() statusDto: ChangeTicketStatusDto
+        @Body() statusDto: ChangeTicketStatusDto,
+        @Req() request: RequestWithUser
     ) {
+        const user = request.user;
+        const userOfficeId = user?.office;
+        
+        if (!userOfficeId) {
+            throw new ForbiddenException("User office information is missing.");
+        }
+        
+        // Verificar acceso al ticket
+        await this.zendeskService.getTicket(ticketId, userOfficeId);
+        
         return this.zendeskService.changeTicketStatus(ticketId, statusDto.status);
     }
 
     @Post('tickets/:ticketId/comments')
+    @ApiOperation({ summary: 'Add a comment to a ticket' })
+    @ApiResponse({ type: TicketResponseDto })
     async addTicketComment(
         @Param('ticketId') ticketId: string,
         @Body('comment') comment: string,
         @Body('authorId') authorId: string,
-        @Body('currentUserId') currentUserId: string, // ID del usuario actual en tu sistema interno
+        @Body('currentUserId') currentUserId: string,
+        @Req() request: RequestWithUser
     ) {
         try {
-            // Primero intentar asignar el ticket al usuario actual internamente
+            const user = request.user;
+            const userOfficeId = user?.office;
+            
+            if (!userOfficeId) {
+                throw new ForbiddenException("User office information is missing.");
+            }
+            
+            // Verificar acceso al ticket
+            await this.zendeskService.getTicket(ticketId, userOfficeId);
+            
+            // Intentar asignar el ticket al usuario actual internamente
             if (currentUserId && currentUserId !== 'unknown') {
                 try {
                     await this.updateInternalAssignment(ticketId, currentUserId);
                 } catch (error) {
-                    console.error(`Error al asignar el ticket internamente: ${error.message}`);
-                    // No interrumpir el flujo por error en la asignación
+                    this.logger.error(`Error al asignar el ticket internamente: ${error.message}`);
                 }
             }
 
-            // Luego añadir el comentario usando la cuenta de Zendesk
             return this.zendeskService.addTicketComment(ticketId, comment, authorId);
         } catch (error) {
             throw new HttpException(
@@ -176,26 +250,63 @@ export class ZendeskController {
         }
     }
 
-
     @Put('tickets/:ticketId/assign')
     @ApiOperation({ summary: 'Assign a ticket to an agent' })
     @ApiResponse({ type: TicketResponseDto })
     async assignTicket(
         @Param('ticketId') ticketId: string,
-        @Body() assignDto: AssignTicketDto
+        @Body() assignDto: AssignTicketDto,
+        @Req() request: RequestWithUser
     ) {
+        const user = request.user;
+        const userOfficeId = user?.office;
+        
+        if (!userOfficeId) {
+            throw new ForbiddenException("User office information is missing.");
+        }
+        
+        // Verificar acceso al ticket
+        await this.zendeskService.getTicket(ticketId, userOfficeId);
+        
         return this.zendeskService.asignTicket(ticketId, assignDto.userId);
     }
 
     @Get('tickets-by-operator/:operatorId')
-    async getTicketsByOperator(@Param('operatorId') operatorId: string) {
+    @ApiOperation({ summary: 'Get tickets assigned to an operator' })
+    @ApiResponse({ type: [TicketResponseDto] })
+    async getTicketsByOperator(
+        @Param('operatorId') operatorId: string,
+        @Req() request: RequestWithUser
+    ) {
+        const user = request.user;
+        const userOfficeId = user?.office;
+        
+        if (!userOfficeId) {
+            throw new ForbiddenException("User office information is missing.");
+        }
+        
+        // Verificar que el operador pertenece a la misma oficina
+        const operator = await this.zendeskService.getUserService().findOne(Number(operatorId));
+        
+        if (!operator || operator.office !== userOfficeId) {
+            throw new ForbiddenException("No tienes acceso a los tickets de este operador.");
+        }
+        
         return this.zendeskService.getTicketsAssignedToOperator(Number(operatorId));
     }
 
     @Get('operators-with-ticket-counts')
-    async getOperatorsWithTicketCounts() {
-        // Get all operators
-        const operators = await this.zendeskService.getUserService().findUsersByRole('operador');
+    @ApiOperation({ summary: 'Get operators with their ticket counts' })
+    async getOperatorsWithTicketCounts(@Req() request: RequestWithUser) {
+        const user = request.user;
+        const userOfficeId = user?.office;
+        
+        if (!userOfficeId) {
+            throw new ForbiddenException("User office information is missing.");
+        }
+        
+        // Get operators from the user's office
+        const operators = await this.zendeskService.getUserService().findUsersByRoleAndOffice('operador', userOfficeId);
 
         // Get ticket counts for each operator
         const operatorsWithCounts = await Promise.all(
@@ -216,24 +327,47 @@ export class ZendeskController {
     }
 
     @Put('reassign-ticket/:ticketId/to-operator/:operatorId')
+    @ApiOperation({ summary: 'Reassign a ticket to a different operator' })
+    @ApiResponse({ type: TicketResponseDto })
     async reassignTicket(
         @Param('ticketId') ticketId: string,
-        @Param('operatorId') operatorId: string
+        @Param('operatorId') operatorId: string,
+        @Req() request: RequestWithUser
     ) {
         try {
-            // 1. Buscar si ya existe una asignación para este ticket
+            const user = request.user;
+            const userOfficeId = user?.office;
+            
+            if (!userOfficeId) {
+                throw new ForbiddenException("User office information is missing.");
+            }
+            
+            // 1. Verificar que el usuario tiene acceso al ticket
+            await this.zendeskService.getTicket(ticketId, userOfficeId);
+            
+            // 2. Verificar que el operador al que se quiere asignar es de la misma oficina
+            const operator = await this.zendeskService.getUserService().findOne(Number(operatorId));
+            
+            if (!operator) {
+                throw new HttpException(`Operator with ID ${operatorId} not found`, HttpStatus.NOT_FOUND);
+            }
+            
+            if (operator.office !== userOfficeId) {
+                throw new ForbiddenException("Cannot assign ticket to an operator from a different office.");
+            }
+            
+            // 3. Buscar si ya existe una asignación para este ticket
             const ticketAssignment = await this.zendeskService.getTicketAssignmentRepository().findOne({
                 where: { zendeskTicketId: ticketId },
-                relations: ['user'] // Importante: cargar la relación con el usuario
+                relations: ['user'] // Cargar la relación con el usuario
             });
 
-            // 2. Actualizar o crear la asignación
+            // 4. Actualizar o crear la asignación
             if (ticketAssignment) {
-                // Actualizar asignación existente
                 ticketAssignment.userId = Number(operatorId);
                 await this.zendeskService.getTicketAssignmentRepository().save(ticketAssignment);
+                this.logger.log(`Ticket ${ticketId} reassigned from ${ticketAssignment.user?.username || 'unknown'} to operator ${operator.username}`);
             } else {
-                // Crear nueva asignación
                 const ticketIdNumber = parseInt(ticketId);
                 const newAssignment = this.zendeskService.getTicketAssignmentRepository().create({
                     ticketId: isNaN(ticketIdNumber) ? 0 : ticketIdNumber,
@@ -242,36 +376,19 @@ export class ZendeskController {
                     status: 'open'
                 });
                 await this.zendeskService.getTicketAssignmentRepository().save(newAssignment);
+                this.logger.log(`New assignment created for ticket ${ticketId} to operator ${operator.username}`);
             }
 
-            // 3. Obtener el ticket actualizado con toda la información
-            const updatedTicket = await this.zendeskService.getTicket(ticketId);
-
-            // 4. Obtener la información del operador asignado
-            const assignedUser = await this.zendeskService.getTicketAssignmentRepository().findOne({
-                where: { zendeskTicketId: ticketId },
-                relations: ['user']
-            });
-
-            // 5. Añadir la información del operador asignado al ticket
-            if (assignedUser && assignedUser.user) {
-                return {
-                    ...updatedTicket,
-                    internal_assignee: {
-                        id: assignedUser.user.id,
-                        name: assignedUser.user.username,
-                        email: assignedUser.user.email
-                    }
-                };
-            }
-
+            // 5. Obtener el ticket actualizado con toda la información
+            const updatedTicket = await this.zendeskService.getTicket(ticketId, userOfficeId);
+            
             return updatedTicket;
         } catch (error) {
-            this.logger.error(`Error al reasignar ticket: ${error.message}`, error.stack);
+            this.logger.error(`Error reassigning ticket: ${error.message}`, error.stack);
             throw new HttpException(
-                `Error al reasignar ticket: ${error.message}`,
-                HttpStatus.INTERNAL_SERVER_ERROR
+                `Error reassigning ticket: ${error.message}`,
+                error instanceof ForbiddenException || error instanceof HttpException ? 
+                    error.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR
             );
         }
-    }
-}
+    }}

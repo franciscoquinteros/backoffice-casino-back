@@ -33,7 +33,8 @@ async function bootstrap() {
   SwaggerModule.setup('doc', app, document);
 
   // Escucha en el puerto de Railway o 3000 localmente
-  const port = process.env.PORT ?? 3000;
+  // En tu archivo main.ts
+  const port = parseInt(process.env.PORT || '8000', 10);
   await app.listen(port);
   console.log(`Server running on port ${port}`);
 }
