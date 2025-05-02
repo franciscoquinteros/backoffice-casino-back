@@ -35,6 +35,30 @@ export class AccountService {
     return this.accountRepository.find(findOptions); // <-- Usar las opciones construidas
   }
 
+  async findCbuByOffice(officeId: string): Promise<string> {
+    console.log(`AccountService: Buscando CBU activo para oficina ${officeId}`);
+
+    // Busca UNA cuenta activa donde la columna 'office' coincida con el officeId recibido
+    // Asumiendo que la columna en Account se llama 'office' y guarda el ID como STRING
+    const account = await this.accountRepository.findOne({
+      select: ['cbu'], // Solo necesitamos el CBU
+      where: {
+        office: officeId, // <-- Busca directamente por officeId
+        status: 'active'
+      }
+      // Podrías añadir un order By si quieres una cuenta específica en caso de haber varias
+      // order: { created_at: 'ASC' } // Ejemplo: la más antigua
+    });
+
+    if (!account || !account.cbu) {
+      console.log(`AccountService: No active account with CBU found for office ${officeId}.`);
+      throw new NotFoundException(`No active account with CBU found for office ${officeId}`);
+    }
+
+    console.log(`AccountService: CBU found for office ${officeId}`);
+    return account.cbu;
+  }
+
 
   async findOne(id: number, officeId?: string): Promise<Account> { // <-- Aceptar officeId opcional
     console.log(`AccountService: Buscando cuenta ID ${id}${officeId ? ` en oficina ${officeId}` : ''}`);

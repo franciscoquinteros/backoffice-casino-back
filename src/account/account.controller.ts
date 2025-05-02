@@ -29,28 +29,29 @@ export class AccountController {
         const accounts = await this.accountService.findAll(officeId);
         return { accounts };
     }
-
     @Get('cbu')
-    @ApiKeyAuth(API_PERMISSIONS.ACCOUNTS_READ_CBUS) // Mantener si aplica
-    @ApiOperation({ summary: 'Get CBU by agent ID (filtered by provided officeId)' })
-    @ApiQuery({ name: 'idAgent', required: true, description: 'ID of the agent', type: String })
-    @ApiQuery({ name: 'officeId', required: true, description: 'ID of the office where the agent belongs', type: String }) // Documentar officeId
-    @ApiResponse({
-        status: 200,
-        description: 'The CBU for the specified agent within the specified office',
-        type: CbuSingleResponseDto
-    })
-    @ApiResponse({ status: 400, description: 'idAgent or officeId query parameter is missing' })
-    @ApiResponse({ status: 404, description: 'No active account found for the agent in the specified office' })
-    async getCbuByAgent(
-        @Query('idAgent') idAgent: string,
-        @Query('officeId') officeId: string // Recibir officeId como query param
+    // Decide qué autenticación necesita este endpoint:
+    // @UseGuards(JwtAuthGuard) // Si requiere usuario logueado (aunque no uses su oficina)
+    // @UseGuards(ApiKeyAuth) // Si requiere API Key
+    @ApiKeyAuth(API_PERMISSIONS.ACCOUNTS_READ_CBUS) // Manteniendo tu ApiKeyAuth original
+    @ApiOperation({ summary: 'Get CBU for an active account in a specific office' })
+    // Cambia el nombre del parámetro en la documentación y en la URL
+    @ApiQuery({ name: 'idAgent', required: true, description: 'ID of the office', type: String })
+    @ApiResponse({ status: 200, description: 'The CBU found for the office', type: CbuSingleResponseDto }) // CbuSingleResponseDto probablemente solo tiene { cbu: string }
+    @ApiResponse({ status: 400, description: 'officeId query parameter is missing' })
+    @ApiResponse({ status: 401, description: 'Unauthorized (Invalid API Key, if ApiKeyAuth is used)' })
+    @ApiResponse({ status: 404, description: 'No active account found for the specified office' })
+    async getCbuByOffice( // <-- Nombre de método cambiado
+        @Query('idAgent') officeId: string // <-- Parámetro renombrado y único necesario
     ): Promise<{ cbu: string }> {
-        if (!idAgent || !officeId) {
-            throw new BadRequestException('Both idAgent and officeId query parameters are required');
+        if (!officeId) {
+            throw new BadRequestException('idAgent query parameter is required');
         }
-        console.log(`[AccountController] getCbuByAgent: Filtering by officeId: ${officeId} for agent: ${idAgent}`);
-        const cbu = await this.accountService.findCbuByAgent(idAgent, officeId);
+        console.log(`[AccountController] getCbuByOffice: Requesting CBU for officeId: ${officeId}`);
+
+        // Llama a un método de servicio simplificado que solo necesita el officeId
+        const cbu = await this.accountService.findCbuByOffice(officeId);
+
         return { cbu };
     }
 
