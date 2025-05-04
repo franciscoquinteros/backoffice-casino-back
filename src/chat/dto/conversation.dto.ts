@@ -13,4 +13,11 @@ export class CreateConversationDto {
     required: false
   })
   title?: string;
+
+  @ApiProperty({
+    description: 'ID de la oficina a la que pertenece la conversación',
+    example: '1',
+    required: false
+  })
+  officeId?: string;
 } 

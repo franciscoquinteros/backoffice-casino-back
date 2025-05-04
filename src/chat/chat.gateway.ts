@@ -140,7 +140,7 @@ export class ChatGateway {
     client.join(`user_${payload.userId}`);
 
     // Búsqueda de conversaciones existentes para este usuario
-    const conversations = await this.conversationService.getUserConversations(payload.userId);
+    const conversations = await this.conversationService.getAllConversationsByUserId(payload.userId, payload.officeId);
 
     // Enviamos las conversaciones al cliente
     client.emit('userConversations', conversations);
@@ -159,10 +159,10 @@ export class ChatGateway {
   @SubscribeMessage('createConversation')
   async handleCreateConversation(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { userId: string }
+    @MessageBody() payload: { userId: string, officeId?: string }
   ) {
     try {
-      console.log(`Solicitud para crear conversación para usuario ${payload.userId}`);
+      console.log(`Solicitud para crear conversación para usuario ${payload.userId}${payload.officeId ? ` con office_id ${payload.officeId}` : ''}`);
 
       // Verificar si ya existe una conversación activa
       const existingConversations = await this.conversationService.getUserConversations(payload.userId);
@@ -182,15 +182,17 @@ export class ChatGateway {
       }
 
       // Crear una nueva conversación
-      const newConversation = await this.conversationService.createConversation(payload.userId);
-      console.log(`Nueva conversación creada para ${payload.userId}: ${newConversation.id}`);
+      const newConversation = await this.conversationService.createConversation({
+        userId: payload.userId,
+        officeId: payload.officeId
+      });
+      console.log(`Nueva conversación creada para ${payload.userId}: ${newConversation.id}${payload.officeId ? ` con office_id ${payload.officeId}` : ''}`);
 
       // Unir al cliente a la sala de esta conversación
       client.join(`conversation_${newConversation.id}`);
 
-      // Notificar a los agentes sobre la nueva conversación
-      const activeConversations = await this.conversationService.getActiveConversations();
-      this.server.to('agents').emit('activeChats', activeConversations);
+      // Notificar a los agentes que deben actualizar sus listas
+      this.server.to('agents').emit('refreshChats');
 
       return {
         success: true,
@@ -221,9 +223,23 @@ export class ChatGateway {
     client.join('agents'); // Sala general de agentes
     client.join(`agent_${payload.agentId}`); // Sala específica para este agente
 
-    // Enviar conversaciones activas al agente
-    const activeConversations = await this.conversationService.getActiveConversations();
-    client.emit('activeChats', activeConversations);
+    // Enviar conversaciones activas al agente - filtradas por el agentId
+    const activeConversations = await this.conversationService.getActiveConversations(payload.officeId, payload.agentId);
+    client.emit('activeChats', activeConversations.map(conv => ({
+      userId: conv.userId,
+      agentId: conv.agentId,
+      conversationId: conv.id,
+      officeId: conv.officeId
+    })));
+
+    // Enviar conversaciones archivadas con los mismos filtros
+    const archivedConversations = await this.conversationService.getClosedConversations(payload.officeId, payload.agentId);
+    client.emit('archivedChats', archivedConversations.map(conv => ({
+      userId: conv.userId,
+      agentId: conv.agentId,
+      conversationId: conv.id,
+      officeId: conv.officeId
+    })));
 
     // Notificar a otros agentes que este agente está conectado
     this.server.to('agents').emit('connectionStatus', {
@@ -299,9 +315,8 @@ export class ChatGateway {
         success: true
       });
 
-      // Actualizar lista de conversaciones activas
-      const activeConversations = await this.conversationService.getActiveConversations();
-      this.server.to('agents').emit('activeChats', activeConversations);
+      // Notificar a los agentes que deben actualizar sus listas
+      this.server.to('agents').emit('refreshChats');
 
       // Enviar respuesta de éxito
       return { success: true };
@@ -383,9 +398,8 @@ export class ChatGateway {
       // Notificar a otros agentes que estén viendo la misma conversación
       this.server.to(`conversation_${data.conversationId}`).emit('newMessage', messageToSend);
 
-      // Actualizar lista de conversaciones activas
-      const activeConversations = await this.conversationService.getActiveConversations();
-      this.server.to('agents').emit('activeChats', activeConversations);
+      // Notificar a los agentes que deben actualizar sus listas
+      this.server.to('agents').emit('refreshChats');
 
       return {
         success: true,
@@ -522,9 +536,8 @@ export class ChatGateway {
       // También enviar el mensaje al cliente para mantener la consistencia
       client.emit('message', messageToSend);
 
-      // Actualizar lista de conversaciones activas para todos los agentes
-      const activeConversations = await this.conversationService.getActiveConversations();
-      this.server.to('agents').emit('activeChats', activeConversations);
+      // Notificar a los agentes que deben actualizar sus listas
+      this.server.to('agents').emit('refreshChats');
 
       return {
         success: true,
@@ -573,6 +586,9 @@ export class ChatGateway {
         chat: formattedChat
       });
 
+      // Notificar a los agentes que deben actualizar sus listas
+      this.server.to('agents').emit('refreshChats');
+
       // Notificar al cliente que su conversación ha sido archivada
       const clientSocketId = this.activeChats.get(data.userId);
       if (clientSocketId) {
@@ -619,6 +635,9 @@ export class ChatGateway {
         chat: formattedChat
       });
 
+      // Notificar a los agentes que deben actualizar sus listas
+      this.server.to('agents').emit('refreshChats');
+
       // Notificar al cliente que su conversación ha sido desarchivada
       const clientSocketId = this.activeChats.get(data.userId);
       if (clientSocketId) {
@@ -634,83 +653,76 @@ export class ChatGateway {
     }
   }
 
-  @SubscribeMessage('getArchivedChats')
-  async handleGetArchivedChats(@ConnectedSocket() client: Socket) {
-    console.log('Obteniendo conversaciones archivadas');
-
+  @SubscribeMessage('getActiveChats')
+  async handleGetActiveChats(@ConnectedSocket() client: Socket, @MessageBody() data?: { officeId?: string, agentId?: string }) {
     try {
-      // Obtener conversaciones archivadas (cerradas)
-      const archivedConversations = await this.conversationService.getClosedConversations();
-
-      // Mapear conversaciones al formato esperado
-      const formattedChats = archivedConversations.map(conversation => ({
-        userId: conversation.userId,
-        agentId: conversation.agentId,
-        conversationId: conversation.id
+      console.log(`Obteniendo chats activos${data?.officeId ? ` para oficina ${data.officeId}` : ''}${data?.agentId ? ` con agente ${data.agentId} o desasignados` : ''}`);
+      
+      // Obtener el agentId del socket o del payload
+      const agentId = data?.agentId || this.socketToAgent.get(client.id);
+      
+      // Pass the officeId and agentId to the service if provided
+      const conversations = await this.conversationService.getActiveConversations(data?.officeId, agentId);
+      
+      // Map conversations to chat data
+      const activeChats = conversations.map(conv => ({
+        userId: conv.userId,
+        agentId: conv.agentId,
+        conversationId: conv.id,
+        officeId: conv.officeId
       }));
-
-      // Solo loguear un resumen para evitar sobrecarga en la consola
-      console.log(`Enviando ${formattedChats.length} conversaciones archivadas`);
-
-      // Emitir las conversaciones archivadas al cliente que las solicitó
-      client.emit('archivedChats', formattedChats);
-
-      return { success: true };
+      
+      client.emit('activeChats', activeChats);
+      return { success: true, data: activeChats };
     } catch (error) {
-      console.error('Error al obtener chats archivados:', error.message);
-      // Enviar un array vacío en caso de error
-      client.emit('archivedChats', []);
-      return { success: false, error: error.message };
+      console.error('Error al obtener chats activos:', error);
+      return { success: false, message: 'Error al obtener chats activos' };
     }
   }
 
-  @SubscribeMessage('getActiveChats')
-  async handleGetActiveChats(@ConnectedSocket() client: Socket) {
-    console.log('Obteniendo conversaciones activas');
-
+  @SubscribeMessage('getArchivedChats')
+  async handleGetArchivedChats(@ConnectedSocket() client: Socket, @MessageBody() data?: { officeId?: string, agentId?: string }) {
     try {
-      // Get active conversations from the conversation service
-      const activeConversations = await this.conversationService.getActiveConversations();
-
-      // Map conversations to the expected format with userId, agentId, and conversationId
-      const formattedChats = activeConversations.map(conversation => ({
-        userId: conversation.userId,
-        agentId: conversation.agentId,
-        conversationId: conversation.id
+      console.log(`Obteniendo chats archivados${data?.officeId ? ` para oficina ${data.officeId}` : ''}${data?.agentId ? ` con agente ${data.agentId} o desasignados` : ''}`);
+      
+      // Obtener el agentId del socket o del payload
+      const agentId = data?.agentId || this.socketToAgent.get(client.id);
+      
+      // Pass the officeId and agentId to the service if provided
+      const conversations = await this.conversationService.getClosedConversations(data?.officeId, agentId);
+      
+      // Map conversations to chat data
+      const archivedChats = conversations.map(conv => ({
+        userId: conv.userId,
+        agentId: conv.agentId,
+        conversationId: conv.id,
+        officeId: conv.officeId
       }));
-
-      // Solo loguear un resumen para evitar sobrecarga en la consola
-      console.log(`Enviando ${formattedChats.length} conversaciones activas`);
-
-      // Emitir solo al cliente que lo solicitó
-      client.emit('activeChats', formattedChats);
-
-      return { success: true };
+      
+      client.emit('archivedChats', archivedChats);
+      return { success: true, data: archivedChats };
     } catch (error) {
-      console.error('Error al obtener chats activos:', error.message);
-      // Send an empty array if there's an error
-      client.emit('activeChats', []);
-      return { success: false, error: error.message };
+      console.error('Error al obtener chats archivados:', error);
+      return { success: false, message: 'Error al obtener chats archivados' };
     }
   }
 
   @SubscribeMessage('getConversationId')
   async handleGetConversationId(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { userId: string; isArchived?: boolean }
+    @MessageBody() data: { userId: string; isArchived?: boolean; officeId?: string }
   ) {
-    console.log(`Buscando ID de conversación para usuario ${data.userId}${data.isArchived ? ' (archivada)' : ''}`);
+    console.log(`Buscando ID de conversación para usuario ${data.userId}${data.isArchived ? ' (archivada)' : ''}${data.officeId ? ` en oficina ${data.officeId}` : ''}`);
 
     try {
       let conversations;
 
       if (data.isArchived) {
-        // Si estamos buscando conversaciones archivadas
-        const allConversations = await this.conversationService.getAllConversationsByUserId(data.userId);
-        conversations = allConversations.filter(conv => conv.status === 'closed');
+        // Para conversaciones archivadas (cerradas)
+        conversations = await this.conversationService.getClosedConversationsByUserId(data.userId, data.officeId);
       } else {
-        // Buscar conversaciones activas existentes para este usuario
-        conversations = await this.conversationService.getActiveConversationsByUserId(data.userId);
+        // Para conversaciones activas
+        conversations = await this.conversationService.getActiveConversationsByUserId(data.userId, data.officeId);
       }
 
       if (conversations && conversations.length > 0) {
@@ -757,13 +769,13 @@ export class ChatGateway {
   @SubscribeMessage('getUserConversations')
   async handleGetUserConversations(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { userId: string }
+    @MessageBody() data: { userId: string; officeId?: string }
   ) {
-    console.log(`Obteniendo conversaciones para usuario ${data.userId}`);
+    console.log(`Obteniendo conversaciones para usuario ${data.userId}${data.officeId ? ` en oficina ${data.officeId}` : ''}`);
 
     try {
-      // Obtener conversaciones del usuario desde el servicio
-      const conversations = await this.conversationService.getUserConversations(data.userId);
+      // Obtener conversaciones del usuario desde el servicio con filtro por office_id
+      const conversations = await this.conversationService.getAllConversationsByUserId(data.userId, data.officeId);
 
       console.log(`Encontradas ${conversations.length} conversaciones para usuario ${data.userId}`);
 

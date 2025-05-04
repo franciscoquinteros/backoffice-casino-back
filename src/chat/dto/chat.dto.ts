@@ -13,6 +13,13 @@ export class JoinChatDto {
     required: false
   })
   title?: string;
+  
+  @ApiProperty({
+    description: 'ID de la oficina a la que pertenece este usuario',
+    example: '1',
+    required: false
+  })
+  officeId?: string;
 }
 
 export class JoinAgentDto {
@@ -21,6 +28,13 @@ export class JoinAgentDto {
     example: 'agent456'
   })
   agentId: string;
+
+  @ApiProperty({
+    description: 'ID de la oficina a la que pertenece este agente',
+    example: '1',
+    required: false
+  })
+  officeId?: string;
 }
 
 export class AssignAgentDto {

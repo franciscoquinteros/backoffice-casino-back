@@ -14,6 +14,9 @@ export class Conversation {
     @Column({ name: 'agent_id', nullable: true })
     agentId: string;
 
+    @Column({ name: 'office_id', nullable: true })
+    officeId: string;
+
     // --- NUEVAS RELACIONES A USER ---
     @ManyToOne(() => User) // Relación ManyToOne a User para el usuario que inició/es propietario
     @JoinColumn({ name: 'user_id' }) // Especifica que usa la columna 'user_id' como FK

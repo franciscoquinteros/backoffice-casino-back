@@ -6,13 +6,13 @@ export class AddOfficeIdToConversation1742000000000 implements MigrationInterfac
         // Añadir la columna office_id a la tabla conversation con NOT NULL
         await queryRunner.query(`
             ALTER TABLE "conversation" 
-            ADD COLUMN "office_id" integer
+            ADD COLUMN "office_id" varchar NULL
         `);
 
         // Establecer un valor por defecto (1) para las filas existentes
         await queryRunner.query(`
             UPDATE "conversation" 
-            SET "office_id" = 1 
+            SET "office_id" = '1' 
             WHERE "office_id" IS NULL
         `);
 
