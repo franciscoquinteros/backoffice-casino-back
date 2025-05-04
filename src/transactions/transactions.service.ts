@@ -238,11 +238,29 @@ export class IpnService implements OnModuleInit {
 
   // Obtener todos los tokens de acceso disponibles
   private getAllAccessTokens(): string[] {
-    const tokens = this.accounts
-      .filter(acc => acc.wallet === 'mercadopago' && acc.status === 'active' && acc.mp_access_token)
-      .map(acc => acc.mp_access_token);
+    const allAccounts = this.accounts;
+    console.log('Total de cuentas disponibles:', allAccounts.length);
 
-    // Eliminar posibles duplicados
+    const mpAccounts = allAccounts.filter(acc => acc.wallet === 'mercadopago');
+    console.log('Cuentas de Mercado Pago:', mpAccounts.length);
+
+    const activeAccounts = mpAccounts.filter(acc => acc.status === 'active');
+    console.log('Cuentas de MP activas:', activeAccounts.length);
+
+    const accountsWithToken = activeAccounts.filter(acc => acc.mp_access_token);
+    console.log('Cuentas de MP activas con token:', accountsWithToken.length);
+
+    if (accountsWithToken.length === 0) {
+      console.log('DETALLE DE CUENTAS ACTIVAS SIN TOKEN:',
+        activeAccounts.map(acc => ({
+          id: acc.id,
+          name: acc.name,
+          hasToken: !!acc.mp_access_token
+        }))
+      );
+    }
+
+    const tokens = accountsWithToken.map(acc => acc.mp_access_token);
     return [...new Set(tokens)];
   }
 
@@ -379,7 +397,7 @@ export class IpnService implements OnModuleInit {
       payer_email: apiData.payer?.email, receiver_id: apiData.collector_id || apiData.receiver_id,
       date_created: apiData.date_created
     });
-    // console.log('Respuesta completa de la API de Mercado Pago:', JSON.stringify(apiData, null, 2)); // Descomentar para debug completo
+    console.log('Respuesta completa de la API de Mercado Pago:', JSON.stringify(apiData, null, 2)); // Descomentar para debug completo
 
     // Determinar la cuenta asociada basada en el receiver_id de MP
     const associatedAccount = this.findAccountByReceiverId(apiData.collector_id || apiData.receiver_id);
@@ -407,7 +425,7 @@ export class IpnService implements OnModuleInit {
     mpTransaction.cbu = cbuFromMp; // Asociar el CBU si se encontró la cuenta
     // --- AÑADIR ASIGNACIÓN DE OFICINA AL MP Transaction si se encuentra la cuenta ---
     // Esto es útil para poder filtrar las transacciones de MP por oficina receptora
-    mpTransaction.office = associatedAccount?.office || null; // <-- Asignar office de la cuenta receptora si está disponible
+    mpTransaction.office = associatedAccount?.agent || null; // <-- Asignar office de la cuenta receptora si está disponible
 
 
     // Si ya tenía relatedUserTransactionId (porque validateWithMercadoPago lo marcó), mantenerlo
@@ -926,11 +944,34 @@ export class IpnService implements OnModuleInit {
 
   // Buscar cuenta por receiver_id de Mercado Pago
   private findAccountByReceiverId(receiverId: string): Account | undefined {
-    return this.accounts.find(account =>
+    console.log(`Buscando cuenta para receiver_id: ${receiverId}`);
+
+    // Buscar primero directamente por receiver_id en la cuenta
+    const accountByDirectMatch = this.accounts.find(account =>
       account.wallet === 'mercadopago' &&
-      (this.mapCbuToMpIdentifier(account.cbu) === receiverId ||
-        account.mp_client_id === receiverId)
+      account.status === 'active' &&
+      account.mp_client_id === receiverId
     );
+
+    if (accountByDirectMatch) {
+      console.log(`Cuenta encontrada por mp_client_id: ${accountByDirectMatch.name} (ID: ${accountByDirectMatch.id})`);
+      return accountByDirectMatch;
+    }
+
+    // Si no se encuentra por mp_client_id, intentar con el mapeo de CBU
+    const accountByMappedCbu = this.accounts.find(account =>
+      account.wallet === 'mercadopago' &&
+      account.status === 'active' &&
+      this.mapCbuToMpIdentifier(account.cbu) === receiverId
+    );
+
+    if (accountByMappedCbu) {
+      console.log(`Cuenta encontrada por mapeo CBU: ${accountByMappedCbu.name} (ID: ${accountByMappedCbu.id})`);
+      return accountByMappedCbu;
+    }
+
+    console.log(`No se encontró cuenta para receiver_id: ${receiverId}`);
+    return undefined;
   }
 
   private matchCbuWithMp(transaction: Transaction | PaymentData, cbu: string): boolean {

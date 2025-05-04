@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsOptional, IsEnum, IsBoolean } from 'class-validator';
+import { Account } from '../entities/account.entity';
 
 export class AccountDto {
   @ApiProperty()
@@ -43,6 +44,28 @@ export class AccountDto {
 
   @ApiProperty()
   created_at: Date;
+
+  @ApiProperty()
+  receiver_id: String;
+
+  // --- AÑADE ESTE CONSTRUCTOR ---
+  constructor(entity: Account) {
+    this.id = entity.id;
+    this.office = entity.office; // Asume que 'office' es string ID
+    this.wallet = entity.wallet;
+    this.name = entity.name;
+    this.alias = entity.alias;
+    this.cbu = entity.cbu;
+    this.operator = entity.operator;
+    this.agent = entity.agent; // Asume que 'agent' es string ID del usuario/agente
+    this.status = entity.status;
+    this.mp_access_token = entity.mp_access_token;
+    this.mp_public_key = entity.mp_public_key;
+    this.mp_client_id = entity.mp_client_id;
+    this.mp_client_secret = entity.mp_client_secret;
+    this.created_at = entity.created_at;
+    this.receiver_id = entity.receiver_id; // Asume que 'receiver_id' es string ID
+  }
 }
 
 export class CreateAccountDto {
@@ -99,6 +122,11 @@ export class CreateAccountDto {
   @IsString()
   @IsOptional()
   mp_client_secret?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  receiver_id?: string;
 }
 
 export class AccountsResponseDto {
