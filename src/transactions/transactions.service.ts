@@ -945,6 +945,13 @@ export class IpnService implements OnModuleInit {
   // Buscar cuenta por receiver_id de Mercado Pago
   private findAccountByReceiverId(receiverId: string): Account | undefined {
     console.log(`Buscando cuenta para receiver_id: ${receiverId}`);
+    console.log("Todas las cuentas disponibles:", this.accounts.map(acc => ({
+      id: acc.id,
+      name: acc.name,
+      agent: acc.agent,
+      office: acc.office,
+      mp_client_id: acc.mp_client_id
+    })));
 
     // Buscar primero directamente por receiver_id en la cuenta
     const accountByDirectMatch = this.accounts.find(account =>
