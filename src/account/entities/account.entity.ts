@@ -43,4 +43,7 @@ export class Account {
 
   @Column({ nullable: true })
   mp_client_secret: string;
+
+  @Column({ nullable: true })
+  receiver_id: string;
 }
