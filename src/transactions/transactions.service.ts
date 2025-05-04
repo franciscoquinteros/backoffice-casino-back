@@ -957,7 +957,7 @@ export class IpnService implements OnModuleInit {
     const accountByDirectMatch = this.accounts.find(account =>
       account.wallet === 'mercadopago' &&
       account.status === 'active' &&
-      account.mp_client_id === receiverId
+      account.receiver_id === receiverId
     );
 
     if (accountByDirectMatch) {
