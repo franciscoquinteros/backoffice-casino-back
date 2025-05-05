@@ -695,7 +695,7 @@ export class IpnService implements OnModuleInit {
       await this.updateTransactionStatus(matchedMpPayment.id.toString(), 'Aceptado');
 
       // 2. Cambiar el depósito externo a "Consolidado" (no "Pending" ni "Aceptado")
-      await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Consolidado');
+      await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Aceptado');
 
       // 3. Añadir referencias cruzadas entre ambas transacciones
       await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
