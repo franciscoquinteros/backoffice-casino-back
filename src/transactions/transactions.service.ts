@@ -530,7 +530,7 @@ export class IpnService implements OnModuleInit {
 
     const pendingMpTransactions = this.transactions.filter(tx =>
       tx.type === 'deposit' &&
-      tx.status === 'Pendiente'
+      tx.status === 'Pending'
     );
     const opId = `validate_${Date.now()}`;
     console.log(`[${opId}] INICIO: Validando depósito:`, JSON.stringify(depositData));
@@ -671,7 +671,7 @@ export class IpnService implements OnModuleInit {
       // Buscamos una transacción que represente un pago de Mercado Pago procesado
       return (
         mpTx.type === 'deposit' && // Es una transacción de tipo 'deposit' (originada por MP IPN)
-        (mpTx.status === 'Pendiente') && // Solo pagos que MP reporta como aprobados/aceptados
+        (mpTx.status === 'Pending') && // Solo pagos que MP reporta como aprobados/aceptados
         !mpTx.relatedUserTransactionId && // Que NO haya validado ya otro depósito de usuario
         typeof mpTx.amount === 'number' && mpTx.amount > 0 && // Asegurar monto válido en MP Tx
         mpTx.amount === savedUserTransaction.amount && // Mismo monto
