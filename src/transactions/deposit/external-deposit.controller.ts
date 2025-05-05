@@ -96,13 +96,52 @@ export class ExternalDepositController {
                 tx.type === 'deposit' &&
                 Math.abs(tx.amount - body.amount) < 0.01 &&
                 tx.payer_email?.toLowerCase() === body.emailOrDni.toLowerCase() &&
-                tx.status === 'Aceptado' &&
-                tx.description?.includes('validado automáticamente')
+                (
+                    // Verificar si coincide por ID de transacción (prioridad alta)
+                    (body.idTransaction && (
+                        tx.external_reference === body.idTransaction ||
+                        tx.id.toString() === body.idTransaction
+                    )) ||
+                    // O verificar por estado y descripción (validación anterior)
+                    (tx.status === 'Aceptado' &&
+                        tx.description?.includes('validado automáticamente'))
+                )
             );
 
             // Dentro del controlador, modificar la sección donde verifica si la combinación ya fue validada
             if (autoValidatedTransactions.length > 0) {
-                console.log(`Ya existe una validación automática para monto=${body.amount}, email=${body.emailOrDni}`);
+                console.log(`Ya existe una validación para monto=${body.amount}, email=${body.emailOrDni}, idTransaction=${body.idTransaction}`);
+
+                // Si encontramos una transacción exactamente con el mismo ID, rechazamos directamente
+                const exactIdMatch = autoValidatedTransactions.find(tx =>
+                    tx.external_reference === body.idTransaction ||
+                    tx.id.toString() === body.idTransaction
+                );
+
+                if (exactIdMatch) {
+                    console.log(`ID de transacción ${body.idTransaction} exactamente igual ya procesado`);
+
+                    // Guardar la transacción rechazada para historial
+                    const rejectedTransaction: Transaction = {
+                        id: `dup_${body.idTransaction || Date.now()}`,
+                        type: 'deposit',
+                        amount: body.amount,
+                        status: 'Rechazado',
+                        date_created: new Date().toISOString(),
+                        description: 'Transacción rechazada: ID de transacción duplicado',
+                        cbu: cbuToUse,
+                        idCliente: body.idClient,
+                        payer_email: body.emailOrDni,
+                        external_reference: body.idTransaction
+                    };
+
+                    await this.ipnService.saveTransaction(rejectedTransaction);
+
+                    return {
+                        status: 'error',
+                        message: 'Este ID de transacción ya fue procesado anteriormente'
+                    };
+                }
 
                 // En lugar de rechazar, creamos una transacción pendiente que requerirá verificación manual
                 const idTransferencia = body.idTransaction || `deposit_${Date.now()}`;
