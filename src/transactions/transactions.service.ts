@@ -954,6 +954,15 @@ export class IpnService implements OnModuleInit {
       receiverId: acc.receiver_id,
     })));
 
+    const receiverIdStr = receiverId.toString();
+
+    this.accounts.forEach(acc => {
+      if (acc.receiver_id) {
+        console.log(`Verificando cuenta: ${acc.name}, receiver_id: ${acc.receiver_id} (${typeof acc.receiver_id}), 
+                    coincide con ${receiverIdStr} (${typeof receiverIdStr}): ${acc.receiver_id.toString() === receiverIdStr}`);
+      }
+    });
+
     // Buscar primero directamente por receiver_id en la cuenta
     const accountByDirectMatch = this.accounts.find(account =>
       account.wallet === 'mercadopago' &&
