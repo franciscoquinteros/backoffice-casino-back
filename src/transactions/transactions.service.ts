@@ -449,7 +449,7 @@ export class IpnService implements OnModuleInit {
     // --- INICIO LÓGICA DE VALIDACIÓN CRUZADA POR IPN ---
     let matchingUserDeposit: Transaction | undefined = undefined;
     // Solo intentar validar si el pago de MP está APROBADO y aún NO HA SIDO USADO para validar otro depósito
-    if ((savedMpTransaction.status === 'approved' || savedMpTransaction.status === 'Aceptado') && !savedMpTransaction.relatedUserTransactionId) {
+    if ((savedMpTransaction.status === 'approved' || savedMpTransaction.status === 'Aceptado' || savedMpTransaction.status === 'Pending') && !savedMpTransaction.relatedUserTransactionId) {
 
       console.log(`[IPN] ${savedMpTransaction.id}: Pago APROBADO y no usado. Buscando depósito de usuario PENDIENTE para matchear...`);
 
@@ -474,31 +474,28 @@ export class IpnService implements OnModuleInit {
       if (matchingUserDeposit) {
         console.log(`[IPN] ${savedMpTransaction.id}: ¡Coincidencia encontrada vía IPN! Validando depósito de usuario ID: ${matchingUserDeposit.id}`);
 
-        // Si encontramos un depósito pendiente de usuario que coincide:
-        // 1. Actualizar el estado del depósito del usuario a 'Aceptado'
-        await this.updateTransactionStatus(matchingUserDeposit.id.toString(), 'Aceptado');
+        // 1. Actualizar la transacción MP a "Aceptado"
+        await this.updateTransactionStatus(savedMpTransaction.id.toString(), 'Aceptado');
 
-        // 2. Establecer la referencia al ID del pago de Mercado Pago en el depósito del usuario
+        // 2. Cambiar el depósito externo a "Consolidado" (no "Pending" ni "Aceptado")
+        await this.updateTransactionStatus(matchingUserDeposit.id.toString(), 'Consolidado');
+
+        // 3. Añadir referencias cruzadas entre ambas transacciones
         await this.updateTransactionInfo(matchingUserDeposit.id.toString(), {
-          referenceTransaction: savedMpTransaction.id.toString(), // En el depósito del usuario, guardamos el ID del pago MP
-          description: `Depósito validado automáticamente con MP Pago ID: ${savedMpTransaction.id} (vía IPN)`
-          // Opcional: Copiar datos del MP Tx si son más precisos
-          // payerId: savedMpTransaction.payer_id, // Ya debería estar copiado si vino de MP
-          // paymentMethodId: savedMpTransaction.payment_method_id, // Ya debería estar copiado si vino de MP
+          reference_transaction: savedMpTransaction.id.toString(),
+          description: `Depósito consolidado en transacción MP ID: ${savedMpTransaction.id}`,
         });
 
-        // 3. Marcar el pago de Mercado Pago (savedMpTransaction) como 'usado'
         await this.updateTransactionInfo(savedMpTransaction.id.toString(), {
-          relatedUserTransactionId: matchingUserDeposit.id.toString(), // En el pago de MP, guardamos el ID del depósito de usuario que lo validó
-          description: (savedMpTransaction.description || '') + ` (Valida depósito usuario ID: ${matchingUserDeposit.id})` // Añadir una nota
+          relatedUserTransactionId: matchingUserDeposit.id.toString(),
+          description: `Transacción validada con depósito externo ID: ${matchingUserDeposit.id}`
         });
 
-        console.log(`[IPN] ${savedMpTransaction.id}: Depósito de usuario ID ${matchingUserDeposit.id} marcado como Aceptado.`);
+        console.log(`[IPN] ${savedMpTransaction.id}: Depósito externo ${matchingUserDeposit.id} marcado como Consolidado.`);
+        console.log(`[IPN] ${savedMpTransaction.id}: Transacción MP marcada como Aceptado.`);
 
         // Opcional: Emitir un evento WebSocket al usuario para notificarle
         // this.server.emit('depositValidated', { userId: matchingUserDeposit.idCliente, transactionId: matchingUserDeposit.id });
-
-
       } else {
         console.log(`[IPN] ${savedMpTransaction.id}: No se encontró depósito de usuario pendiente y sin usar coincidente para este pago MP.`);
         // El pago de MP (savedMpTransaction) queda registrado con su estado original ('approved', etc.)
