@@ -548,20 +548,7 @@ export class IpnService implements OnModuleInit {
     );
 
     // Log detalles de cada transacción candidata
-    sameAmountTransactions.forEach(tx => {
-      console.log(`[${opId}] DEPURACIÓN: Analizando transacción MP ID: ${tx.id}`);
-      console.log(`  - Tipo: ${tx.type === 'deposit' ? 'Depósito ✓' : 'Otro X'}`);
-      console.log(`  - Estado: ${tx.status === 'Pendiente' ? 'Pendiente ✓' : tx.status + ' X'}`);
-      console.log(`  - Ya usada: ${!tx.relatedUserTransactionId ? 'No ✓' : 'Sí X'}`);
-      console.log(`  - Monto: ${tx.amount} (Diff: ${Math.abs(tx.amount - savedUserTransaction.amount)})`);
-      console.log(`  - CBU Match: ${this.matchCbuWithMp(tx, savedUserTransaction.cbu) ? 'Sí ✓' : 'No X'}`);
-      console.log(`  - Email User: ${savedUserTransaction.payer_email}`);
-      console.log(`  - Email MP: ${tx.payer_email}`);
-      console.log(`  - Email Match: ${tx.payer_email && savedUserTransaction.payer_email &&
-        tx.payer_email.toLowerCase() === savedUserTransaction.payer_email.toLowerCase() ? 'Sí ✓' : 'No X'}`);
-      console.log(`  - Fecha cercana: ${tx.date_created && savedUserTransaction.date_created &&
-        this.isDateCloseEnough(tx.date_created, savedUserTransaction.date_created) ? 'Sí ✓' : 'No X'}`);
-    });
+
 
     // --- VALIDACIÓN DE CBU CON FILTRO DE OFICINA ---
     // Pasar el CBU del payload Y el idAgent (oficina) a isValidCbu
@@ -636,6 +623,21 @@ export class IpnService implements OnModuleInit {
     console.log(`[${opId}] Creando/Actualizando transacción de usuario con estado: ${userDepositTransaction.status} (ID: ${userDepositTransaction.id}) en oficina: ${userDepositTransaction.office}`, userDepositTransaction); // <-- Log office
     // saveTransaction ya actualiza la lista en memoria si la transacción existe, o la añade si es nueva
     const savedUserTransaction = await this.saveTransaction(userDepositTransaction);
+
+    sameAmountTransactions.forEach(tx => {
+      console.log(`[${opId}] DEPURACIÓN: Analizando transacción MP ID: ${tx.id}`);
+      console.log(`  - Tipo: ${tx.type === 'deposit' ? 'Depósito ✓' : 'Otro X'}`);
+      console.log(`  - Estado: ${tx.status === 'Pendiente' ? 'Pendiente ✓' : tx.status + ' X'}`);
+      console.log(`  - Ya usada: ${!tx.relatedUserTransactionId ? 'No ✓' : 'Sí X'}`);
+      console.log(`  - Monto: ${tx.amount} (Diff: ${Math.abs(tx.amount - savedUserTransaction.amount)})`);
+      console.log(`  - CBU Match: ${this.matchCbuWithMp(tx, savedUserTransaction.cbu) ? 'Sí ✓' : 'No X'}`);
+      console.log(`  - Email User: ${savedUserTransaction.payer_email}`);
+      console.log(`  - Email MP: ${tx.payer_email}`);
+      console.log(`  - Email Match: ${tx.payer_email && savedUserTransaction.payer_email &&
+        tx.payer_email.toLowerCase() === savedUserTransaction.payer_email.toLowerCase() ? 'Sí ✓' : 'No X'}`);
+      console.log(`  - Fecha cercana: ${tx.date_created && savedUserTransaction.date_created &&
+        this.isDateCloseEnough(tx.date_created, savedUserTransaction.date_created) ? 'Sí ✓' : 'No X'}`);
+    });
 
 
     // Si la transacción del usuario ya estaba Aceptada, no necesitamos buscar un match de nuevo.
