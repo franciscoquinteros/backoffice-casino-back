@@ -1037,51 +1037,39 @@ export class IpnService implements OnModuleInit {
   }
 
   private matchCbuWithMp(transaction: Transaction | PaymentData, cbu: string): boolean {
-    // Asegurarse de que la transacción tenga los campos necesarios
+    // Para depuración
+    console.log(`matchCbuWithMp: Verificando coincidencia entre transacción ID: ${transaction.id || 'Sin ID'} y CBU: ${cbu}`);
+    console.log(`matchCbuWithMp: Datos de transacción - receiver_id: ${transaction.receiver_id || 'null'}, cbu: ${(transaction as Transaction).cbu || 'null'}`);
+
+    // Casos especiales para transacciones locales (ambas tienen CBU)
+    if ((transaction as Transaction).cbu && (transaction as Transaction).cbu === cbu) {
+      console.log(`matchCbuWithMp: ¡COINCIDENCIA DIRECTA DE CBU!`);
+      return true;
+    }
+
+    // Resto de la lógica existente
     if (!('receiver_id' in transaction) || !transaction.receiver_id) {
-      // console.warn('matchCbuWithMp: Transacción no tiene receiver_id.');
+      console.log(`matchCbuWithMp: Transacción no tiene receiver_id.`);
       return false;
     }
 
-    // El payment_method_id no es estrictamente necesario para el matcheo CBU vs receiver_id,
-    // but the original logic included it. Let's keep it if it's part of the requirement.
-    // if (!transaction.payment_method_id) return false; // Depends on if you always expect payment_method_id
-
-    // Asegurarse de que el CBU del user is valid
     if (!cbu) {
-      // console.warn('matchCbuWithMp: CBU del user is null or empty.');
+      console.log(`matchCbuWithMp: CBU del usuario es null o vacío.`);
       return false;
     }
 
     const mappedCbuIdentifier = this.mapCbuToMpIdentifier(cbu);
 
-    // If we couldn't map the CBU to an MP identifier, there can be no match
     if (!mappedCbuIdentifier) {
-      // console.warn(`mapCbuToMpIdentifier: Could not map CBU ${cbu} to MP identifier.`);
+      console.log(`matchCbuWithMp: No se pudo mapear CBU ${cbu} a identificador MP.`);
       return false;
     }
 
-
-
-
-    // Matching logic: The MP identifier of the CBU must match the receiver_id of the MP transaction
     const receiverIdMatch = mappedCbuIdentifier === transaction.receiver_id;
-
-    // Additional logic if the payment_method_id is 'cvu' (as it was in your original code)
-    // This might be redundant if the CBU -> receiver_id mapping is already sufficient.
-    // I'm keeping it as it was, but consider if this part is really necessary for CVUs.
-    const cvuCheck = transaction.payment_method_id === 'cvu' && (transaction as Transaction).type === 'deposit'; // Ensure it only applies to Transaction type deposits
-
-
+    const cvuCheck = transaction.payment_method_id === 'cvu' && (transaction as Transaction).type === 'deposit';
     const isMatch = receiverIdMatch || cvuCheck;
 
-    // if (isMatch) {
-    //    console.log(`matchCbuWithMp: CBU ${cbu} (mapped to ${mappedCbuIdentifier}) matches receiver_id ${transaction.receiver_id} (or CVU check).`);
-    // } else {
-    //    console.log(`matchCbuWithMp: CBU ${cbu} (mapped to ${mappedCbuIdentifier}) DOES NOT match receiver_id ${transaction.receiver_id}.`);
-    // }
-
-
+    console.log(`matchCbuWithMp: Resultado final isMatch = ${isMatch} (receiverIdMatch: ${receiverIdMatch}, cvuCheck: ${cvuCheck})`);
     return isMatch;
   }
 }
