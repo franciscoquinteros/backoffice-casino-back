@@ -543,9 +543,7 @@ export class IpnService implements OnModuleInit {
 
     // Extraemos el idTransferencia del payload, usando fallback si es necesario
     const idTransferencia = depositData.idTransaction || `deposit_${Date.now()}`;
-    const sameAmountTransactions = pendingMpTransactions.filter(tx =>
-      Math.abs(tx.amount - savedUserTransaction.amount) < 0.01
-    );
+
 
     // Log detalles de cada transacción candidata
 
@@ -623,6 +621,9 @@ export class IpnService implements OnModuleInit {
     console.log(`[${opId}] Creando/Actualizando transacción de usuario con estado: ${userDepositTransaction.status} (ID: ${userDepositTransaction.id}) en oficina: ${userDepositTransaction.office}`, userDepositTransaction); // <-- Log office
     // saveTransaction ya actualiza la lista en memoria si la transacción existe, o la añade si es nueva
     const savedUserTransaction = await this.saveTransaction(userDepositTransaction);
+    const sameAmountTransactions = pendingMpTransactions.filter(tx =>
+      Math.abs(tx.amount - savedUserTransaction.amount) < 0.01
+    );
 
     sameAmountTransactions.forEach(tx => {
       console.log(`[${opId}] DEPURACIÓN: Analizando transacción MP ID: ${tx.id}`);
