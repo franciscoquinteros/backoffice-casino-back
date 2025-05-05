@@ -425,7 +425,7 @@ export class IpnService implements OnModuleInit {
     mpTransaction.cbu = cbuFromMp; // Asociar el CBU si se encontró la cuenta
     // --- AÑADIR ASIGNACIÓN DE OFICINA AL MP Transaction si se encuentra la cuenta ---
     // Esto es útil para poder filtrar las transacciones de MP por oficina receptora
-    mpTransaction.office = associatedAccount?.agent || null; // <-- Asignar office de la cuenta receptora si está disponible
+    mpTransaction.office = associatedAccount?.office || null; // <-- Asignar office de la cuenta receptora si está disponible
 
 
     // Si ya tenía relatedUserTransactionId (porque validateWithMercadoPago lo marcó), mantenerlo
@@ -538,6 +538,11 @@ export class IpnService implements OnModuleInit {
       console.warn(`[${opId}] Validación de CBU fallida para CBU ${depositData.cbu} en oficina ${depositData.idAgent}.`); // Log actualizado
       // Crear transacción 'Rechazado' por CBU inválido si no existe ya con ese idTransferencia
       const existingUserReport = await this.getTransactionById(idTransferencia);
+      const officeAccount = this.accounts.find(acc =>
+        acc.agent === depositData.idAgent &&
+        acc.wallet === 'mercadopago' &&
+        acc.status === 'active'
+      );
       if (existingUserReport) {
         console.log(`[${opId}] El ID de transferencia ${idTransferencia} ya existe, devolviendo estado existente.`);
         const responseStatus = (existingUserReport.status === 'Aceptado' || existingUserReport.status === 'Pending') ? 'success' : 'error';
@@ -557,7 +562,8 @@ export class IpnService implements OnModuleInit {
           idCliente: depositData.idCliente,
           payer_email: depositData.email, // Si usas este campo en tu DTO
           external_reference: depositData.idTransaction,
-          office: depositData.idAgent, // <-- GUARDAR idAgent como 'office'
+
+          office: officeAccount?.office, // <-- GUARDAR idAgent como 'office'
         };
         await this.saveTransaction(rejectedTransaction);
         return { status: 'error', message: 'El CBU proporcionado no es válido o no está configurado para esta oficina.', transaction: rejectedTransaction }; // Mensaje más específico
