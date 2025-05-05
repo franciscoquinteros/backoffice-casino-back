@@ -91,22 +91,33 @@ export class ExternalDepositController {
                 }
             }
 
-            // PASO 2: Verificar si la combinación monto/email ha sido validada automáticamente antes
-            const autoValidatedTransactions = allTransactions.filter(tx =>
-                tx.type === 'deposit' &&
-                Math.abs(tx.amount - body.amount) < 0.01 &&
-                tx.payer_email?.toLowerCase() === body.emailOrDni.toLowerCase() &&
-                (
-                    // Verificar si coincide por ID de transacción (prioridad alta)
-                    (body.idTransaction && (
-                        tx.external_reference === body.idTransaction ||
-                        tx.id.toString() === body.idTransaction
-                    )) ||
-                    // O verificar por estado y descripción (validación anterior)
-                    (tx.status === 'Aceptado' &&
-                        tx.description?.includes('validado automáticamente'))
-                )
-            );
+            // PASO 2: Verificar si la combinación monto/email/ID ha sido validada antes
+            const autoValidatedTransactions = allTransactions.filter(tx => {
+                // Condición básica: mismo tipo y monto aproximado
+                const basicMatch = tx.type === 'deposit' &&
+                    Math.abs(tx.amount - body.amount) < 0.01;
+
+                // Condición de email
+                const emailMatch = tx.payer_email?.toLowerCase() === body.emailOrDni.toLowerCase();
+
+                // Condición de ID de transacción (si se proporcionó)
+                const idMatch = body.idTransaction && (
+                    tx.external_reference === body.idTransaction ||
+                    tx.id.toString() === body.idTransaction
+                );
+
+                // Condición de validación automática previa
+                const autoValidatedMatch = tx.status === 'Aceptado' &&
+                    tx.description?.includes('validado automáticamente');
+
+                // Debe cumplir las condiciones básicas, más:
+                // - Coincidencia exacta por ID, O
+                // - Coincidencia por email y validación automática previa
+                return basicMatch && (
+                    idMatch ||
+                    (emailMatch && autoValidatedMatch)
+                );
+            });
 
             // Dentro del controlador, modificar la sección donde verifica si la combinación ya fue validada
             if (autoValidatedTransactions.length > 0) {
@@ -132,7 +143,8 @@ export class ExternalDepositController {
                         cbu: cbuToUse,
                         idCliente: body.idClient,
                         payer_email: body.emailOrDni,
-                        external_reference: body.idTransaction
+                        external_reference: body.idTransaction,
+
                     };
 
                     await this.ipnService.saveTransaction(rejectedTransaction);
