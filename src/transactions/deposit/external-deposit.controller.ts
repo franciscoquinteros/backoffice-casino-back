@@ -184,7 +184,7 @@ export class ExternalDepositController {
                 );
 
                 if (alreadyUsedForValidation) {
-                    console.log(`La transacción original ${matchingTransaction.id} ya fue usada para validar otra transacción`);
+                    console.log(`La transacción original ${secondaryMatchingTransaction.id} ya fue usada para validar otra transacción`);
 
                     // Guardar transacción rechazada para historial
                     const rejectedTransaction: Transaction = {
