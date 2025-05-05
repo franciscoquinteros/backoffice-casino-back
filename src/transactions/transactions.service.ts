@@ -413,7 +413,7 @@ export class IpnService implements OnModuleInit {
 
     // Actualizar datos de la transacción de MP con la info fresca de la API
     mpTransaction.amount = apiData.transaction_amount || 0;
-    mpTransaction.status = 'Pendiente'; // Estado reportado por MP
+    mpTransaction.status = 'Pending'; // Estado reportado por MP
     mpTransaction.date_created = apiData.date_created;
     mpTransaction.description = apiData.description || 'Pago recibido vía IPN - Pendiente de validación';
     mpTransaction.payment_method_id = apiData.payment_method_id;
