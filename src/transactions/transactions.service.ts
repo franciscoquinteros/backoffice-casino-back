@@ -683,39 +683,33 @@ export class IpnService implements OnModuleInit {
       );
     });
 
+    // En la función validateWithMercadoPago, después de encontrar una coincidencia y 
+    // antes de actualizar la transacción MP:
+
     if (matchingLocalMpTx) {
       matchedMpPayment = matchingLocalMpTx;
       matchedFromApi = false;
       console.log(`[${opId}] Coincidencia encontrada localmente con Pago MP ID: ${matchingLocalMpTx.id}`);
 
-      // En lugar de actualizar ambas transacciones, vamos a:
-      // 1. Transferir toda la información importante del depósito del usuario a la transacción MP
-      const updateInfo: any = {
-        status: 'Aceptado',
-        idCliente: savedUserTransaction.idCliente,
-        description: `Depósito validado automáticamente (Consolidado de depósito externo ID: ${savedUserTransaction.id})`,
-        office: savedUserTransaction.office || matchingLocalMpTx.office
-      };
+      // 1. Actualizar la transacción MP a "Aceptado"
+      await this.updateTransactionStatus(matchedMpPayment.id.toString(), 'Aceptado');
 
-      // 2. Actualizar la transacción MP con esta información
-      await this.updateTransactionInfo(matchedMpPayment.id.toString(), updateInfo);
-      console.log(`[${opId}] Transacción MP ${matchedMpPayment.id} actualizada con información del depósito externo ${savedUserTransaction.id}`);
+      // 2. Cambiar el depósito externo a "Consolidado" (no "Pending" ni "Aceptado")
+      await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Consolidado');
 
-      // 3. Eliminar la transacción de depósito externo (o marcarla como "Consolidada")
-      // Opción 1: Eliminar físicamente (si tu base de datos lo permite y es apropiado)
-      // await this.transactionRepository.delete(savedUserTransaction.id.toString());
-
-      // Opción 2: Marcarla como consolidada (más seguro para auditoría)
+      // 3. Añadir referencias cruzadas entre ambas transacciones
       await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
-        status: 'Consolidado',
+        reference_transaction: matchedMpPayment.id.toString(),
         description: `Depósito consolidado en transacción MP ID: ${matchedMpPayment.id}`,
-        reference_transaction: matchedMpPayment.id.toString()
       });
 
-      // Actualizar la lista en memoria
-      this.transactions = this.transactions.filter(t => t.id.toString() !== savedUserTransaction.id.toString());
+      await this.updateTransactionInfo(matchedMpPayment.id.toString(), {
+        relatedUserTransactionId: savedUserTransaction.id.toString(),
+        description: `Transacción validada con depósito externo ID: ${savedUserTransaction.id}`
+      });
 
-      console.log(`[${opId}] Depósito externo ${savedUserTransaction.id} consolidado en transacción MP ${matchedMpPayment.id}`);
+      console.log(`[${opId}] Depósito externo ${savedUserTransaction.id} marcado como Consolidado.`);
+      console.log(`[${opId}] Transacción MP ${matchedMpPayment.id} marcada como Aceptado.`);
 
       // Obtener la transacción MP actualizada para devolverla
       const updatedMpTransaction = await this.getTransactionById(matchedMpPayment.id.toString());
