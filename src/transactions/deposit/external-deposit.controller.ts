@@ -92,97 +92,81 @@ export class ExternalDepositController {
             }
 
             // PASO 2: Verificar si la combinación monto/email/ID ha sido validada antes
-            const autoValidatedTransactions = allTransactions.filter(tx => {
-                // Condición básica: mismo tipo y monto aproximado
-                const basicMatch = tx.type === 'deposit' &&
-                    Math.abs(tx.amount - body.amount) < 0.01;
+            // PASO 2: Verificar si ya existe un depósito externo o transferencia MP con los mismos datos
+            const matchingTransaction = allTransactions.find(tx =>
+                tx.type === 'deposit' &&
+                Math.abs(tx.amount - body.amount) < 0.01 &&
+                tx.payer_email?.toLowerCase() === body.emailOrDni.toLowerCase() &&
+                tx.cbu === cbuToUse &&
+                (tx.status === 'Aceptado' || tx.status === 'approved') &&
+                // Si hay ID de transacción, verificar que coincida también
+                (!body.idTransaction || tx.external_reference === body.idTransaction || tx.id.toString() === body.idTransaction)
+            );
 
-                // Condición de email
-                const emailMatch = tx.payer_email?.toLowerCase() === body.emailOrDni.toLowerCase();
+            if (matchingTransaction) {
+                console.log(`¡Encontrada transacción coincidente!`, matchingTransaction);
 
-                // Condición de ID de transacción (si se proporcionó)
-                const idMatch = body.idTransaction && (
-                    tx.external_reference === body.idTransaction ||
-                    tx.id.toString() === body.idTransaction
+                // Verificar si esta transacción ya fue usada para validar otra
+                const alreadyUsedForValidation = allTransactions.some(tx =>
+                    tx.reference_transaction === matchingTransaction.id.toString()
                 );
 
-                // Condición de validación automática previa
-                const autoValidatedMatch = tx.status === 'Aceptado' &&
-                    tx.description?.includes('validado automáticamente');
+                if (alreadyUsedForValidation) {
+                    console.log(`La transacción ${matchingTransaction.id} ya fue usada para validar otra transacción`);
 
-                // Debe cumplir las condiciones básicas, más:
-                // - Coincidencia exacta por ID, O
-                // - Coincidencia por email y validación automática previa
-                return basicMatch && (
-                    idMatch ||
-                    (emailMatch && autoValidatedMatch)
-                );
-            });
-
-            // Dentro del controlador, modificar la sección donde verifica si la combinación ya fue validada
-            if (autoValidatedTransactions.length > 0) {
-                console.log(`Ya existe una validación para monto=${body.amount}, email=${body.emailOrDni}, idTransaction=${body.idTransaction}`);
-
-                // Si encontramos una transacción exactamente con el mismo ID, rechazamos directamente
-                const exactIdMatch = autoValidatedTransactions.find(tx =>
-                    tx.external_reference === body.idTransaction ||
-                    tx.id.toString() === body.idTransaction
-                );
-
-                if (exactIdMatch) {
-                    console.log(`ID de transacción ${body.idTransaction} exactamente igual ya procesado`);
-
-                    // Guardar la transacción rechazada para historial
-                    const rejectedTransaction: Transaction = {
-                        id: `dup_${body.idTransaction || Date.now()}`,
+                    // Crear una transacción pendiente que requerirá verificación manual
+                    const idTransferencia = body.idTransaction || `deposit_${Date.now()}`;
+                    const pendingTransaction: Transaction = {
+                        id: idTransferencia,
                         type: 'deposit',
                         amount: body.amount,
-                        status: 'Rechazado',
+                        status: 'Pending',
                         date_created: new Date().toISOString(),
-                        description: 'Transacción rechazada: ID de transacción duplicado',
+                        description: 'Depósito pendiente: Se requiere verificación manual (transacción original ya utilizada)',
                         cbu: cbuToUse,
                         idCliente: body.idClient,
                         payer_email: body.emailOrDni,
                         external_reference: body.idTransaction,
-
+                        office: body.idAgent // Guardar el ID de la oficina (será convertido a nombre por el servicio)
                     };
 
-                    await this.ipnService.saveTransaction(rejectedTransaction);
+                    await this.ipnService.saveTransaction(pendingTransaction);
 
                     return {
-                        status: 'error',
-                        message: 'Este ID de transacción ya fue procesado anteriormente'
+                        status: 'success',
+                        message: ''
                     };
                 }
 
-                // En lugar de rechazar, creamos una transacción pendiente que requerirá verificación manual
+                // Crear transacción aceptada
                 const idTransferencia = body.idTransaction || `deposit_${Date.now()}`;
-                const pendingTransaction: Transaction = {
+                const autoApprovedTransaction: Transaction = {
                     id: idTransferencia,
                     type: 'deposit',
                     amount: body.amount,
-                    status: 'Pending', // Marcamos como pendiente en lugar de rechazado
+                    status: 'Aceptado',
                     date_created: new Date().toISOString(),
-                    description: 'Depósito pendiente: Se requiere verificación manual (combinación usada anteriormente)',
+                    description: 'Depósito validado automáticamente',
                     cbu: cbuToUse,
                     idCliente: body.idClient,
-                    payer_email: body.emailOrDni, // Updated to use emailOrDni
-                    external_reference: body.idTransaction
+                    payer_email: body.emailOrDni,
+                    external_reference: body.idTransaction,
+                    reference_transaction: matchingTransaction.id.toString(), // Referencia a la transacción original
+                    office: body.idAgent // Guardar el ID de la oficina (será convertido a nombre por el servicio)
                 };
 
-                // Guardar transacción pendiente
-                await this.ipnService.saveTransaction(pendingTransaction);
+                await this.ipnService.saveTransaction(autoApprovedTransaction);
 
-                // Devolver respuesta simplificada exitosa
                 return {
                     status: 'success',
                     message: ''
                 };
             }
 
+
             // PASO 3: Buscar transacción original que coincida (para validación automática)
             // Solo buscar transacciones reales (no las validadas automáticamente)
-            const matchingTransaction = allTransactions.find(tx =>
+            const secondaryMatchingTransaction = allTransactions.find(tx =>
                 tx.type === 'deposit' &&
                 Math.abs(tx.amount - body.amount) < 0.01 &&
                 tx.payer_email?.toLowerCase() === body.emailOrDni.toLowerCase() &&
@@ -190,13 +174,13 @@ export class ExternalDepositController {
                 !tx.description?.includes('validado automáticamente')
             );
 
-            if (matchingTransaction) {
-                console.log('¡Encontrada transacción coincidente real!', matchingTransaction);
+            if (secondaryMatchingTransaction) {
+                console.log('¡Encontrada transacción coincidente real!', secondaryMatchingTransaction);
 
                 // Verificar si esta transacción original ya fue usada para validar otra
                 const alreadyUsedForValidation = allTransactions.some(tx =>
                     tx.description?.includes('validado automáticamente') &&
-                    tx.reference_transaction === matchingTransaction.id.toString()
+                    tx.reference_transaction === secondaryMatchingTransaction.id.toString()
                 );
 
                 if (alreadyUsedForValidation) {
@@ -236,7 +220,7 @@ export class ExternalDepositController {
                     idCliente: body.idClient,
                     payer_email: body.emailOrDni, // Updated to use emailOrDni
                     external_reference: body.idTransaction,
-                    reference_transaction: matchingTransaction.id.toString() // Referencia a la transacción original
+                    reference_transaction: secondaryMatchingTransaction.id.toString() // Referencia a la transacción original
                 };
 
                 await this.ipnService.saveTransaction(autoApprovedTransaction);
