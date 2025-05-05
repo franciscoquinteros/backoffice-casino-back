@@ -413,9 +413,9 @@ export class IpnService implements OnModuleInit {
 
     // Actualizar datos de la transacción de MP con la info fresca de la API
     mpTransaction.amount = apiData.transaction_amount || 0;
-    mpTransaction.status = apiData.status || 'Pending'; // Estado reportado por MP
+    mpTransaction.status = 'Pendiente'; // Estado reportado por MP
     mpTransaction.date_created = apiData.date_created;
-    mpTransaction.description = apiData.description || 'Pago recibido vía IPN';
+    mpTransaction.description = apiData.description || 'Pago recibido vía IPN - Pendiente de validación';
     mpTransaction.payment_method_id = apiData.payment_method_id;
     mpTransaction.payer_id = apiData.payer?.id?.toString() || null;
     mpTransaction.payer_email = apiData.payer?.email || null;
@@ -637,13 +637,13 @@ export class IpnService implements OnModuleInit {
       // Buscamos una transacción que represente un pago de Mercado Pago procesado
       return (
         mpTx.type === 'deposit' && // Es una transacción de tipo 'deposit' (originada por MP IPN)
-        (mpTx.status === 'Aceptado' || mpTx.status === 'approved') && // Solo pagos que MP reporta como aprobados/aceptados
+        (mpTx.status === 'Pendiente') && // Solo pagos que MP reporta como aprobados/aceptados
         !mpTx.relatedUserTransactionId && // Que NO haya validado ya otro depósito de usuario
         typeof mpTx.amount === 'number' && mpTx.amount > 0 && // Asegurar monto válido en MP Tx
         mpTx.amount === savedUserTransaction.amount && // Mismo monto
         savedUserTransaction.cbu && // Asegurar que el depósito de usuario tiene CBU
         this.matchCbuWithMp(mpTx, savedUserTransaction.cbu) && // El pago de MP llegó a la cuenta del CBU reportado por el usuario
-        // mpTx.payer_email && savedUserTransaction.payer_email && mpTx.payer_email.toLowerCase() === savedUserTransaction.payer_email.toLowerCase() && // <-- VALIDACIÓN POR EMAIL ELIMINADA
+        mpTx.payer_email && savedUserTransaction.payer_email && mpTx.payer_email.toLowerCase() === savedUserTransaction.payer_email.toLowerCase() && // <-- VALIDACIÓN POR EMAIL ELIMINADA
         mpTx.date_created && savedUserTransaction.date_created && // Asegurar que ambas fechas existan
         this.isDateCloseEnough(mpTx.date_created, savedUserTransaction.date_created) // Fecha de creación cercana (del pago MP y del reporte de usuario)
       );
@@ -653,6 +653,10 @@ export class IpnService implements OnModuleInit {
       matchedMpPayment = matchingLocalMpTx;
       matchedFromApi = false; // El match vino de la lista local en memoria
       console.log(`[${opId}] Coincidencia encontrada localmente con Pago MP ID: ${matchingLocalMpTx.id}`);
+      await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Aceptado');
+
+      // 2. También actualizar el estado de la transacción de MP a 'Aceptado'
+      await this.updateTransactionStatus(matchedMpPayment.id.toString(), 'Aceptado');
 
     } else {
       // 2. Si no hay coincidencia local de un pago MP *aprobado y sin usar*, consultar la API de MP
