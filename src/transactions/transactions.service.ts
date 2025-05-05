@@ -476,9 +476,11 @@ export class IpnService implements OnModuleInit {
 
         // 1. Actualizar la transacción MP a "Aceptado"
         await this.updateTransactionStatus(savedMpTransaction.id.toString(), 'Aceptado');
+        console.log(`[IPN DEBUG ${savedMpTransaction.id}] MP TX actualizada a Aceptado (aparentemente).`);
 
         // 2. Cambiar el depósito externo a "Consolidado" (no "Pending" ni "Aceptado")
         await this.updateTransactionStatus(matchingUserDeposit.id.toString(), 'Consolidado');
+        console.log(`[IPN DEBUG ${matchingUserDeposit.id}] User Deposit actualizado a Consolidado (aparentemente).`);
 
         // 3. Añadir referencias cruzadas entre ambas transacciones
         await this.updateTransactionInfo(matchingUserDeposit.id.toString(), {
