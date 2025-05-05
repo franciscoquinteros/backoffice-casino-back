@@ -434,6 +434,14 @@ export class IpnService implements OnModuleInit {
     // Guardar/Actualizar la transacción de Mercado Pago en nuestra BD
     const savedMpTransaction = await this.saveTransaction(mpTransaction); // mpTransaction ahora es la guardada
     // saveTransaction ya actualiza la lista en memoria
+    console.log(`[IPN] DEPURACIÓN: Transacción MP guardada con los siguientes datos:`);
+    console.log(`  - ID: ${savedMpTransaction.id}`);
+    console.log(`  - Monto: ${savedMpTransaction.amount}`);
+    console.log(`  - Status: "${savedMpTransaction.status}"`); // El doble comillas es intencional para ver espacios
+    console.log(`  - Email: ${savedMpTransaction.payer_email}`);
+    console.log(`  - CBU: ${savedMpTransaction.cbu}`);
+    console.log(`  - Office: ${savedMpTransaction.office}`);
+    console.log(`  - Descripción: ${savedMpTransaction.description}`);
 
     console.log(`[IPN] ${savedMpTransaction.id}: Transacción de MP guardada/actualizada con estado MP: ${savedMpTransaction.status}. Oficina: ${savedMpTransaction.office}`); // <-- Log office
 
@@ -519,6 +527,11 @@ export class IpnService implements OnModuleInit {
 
   // Modificar validateWithMercadoPago para GUARDAR idAgent como 'office'
   async validateWithMercadoPago(depositData: RussiansDepositData) {
+
+    const pendingMpTransactions = this.transactions.filter(tx =>
+      tx.type === 'deposit' &&
+      tx.status === 'Pendiente'
+    );
     const opId = `validate_${Date.now()}`;
     console.log(`[${opId}] INICIO: Validando depósito:`, JSON.stringify(depositData));
     console.log(`[${opId}] Email recibido para depósito:`, depositData.email);
@@ -526,11 +539,29 @@ export class IpnService implements OnModuleInit {
     console.log('Email recibido para depósito:', depositData.email);
     // Log para ver idAgent recibido
     console.log(`[${opId}] idAgent recibido:`, depositData.idAgent); // <-- Log para ver idAgent recibido
-
+    console.log(`[${opId}] DEPURACIÓN: Encontradas ${pendingMpTransactions.length} transacciones MP Pendientes en total`);
 
     // Extraemos el idTransferencia del payload, usando fallback si es necesario
     const idTransferencia = depositData.idTransaction || `deposit_${Date.now()}`;
+    const sameAmountTransactions = pendingMpTransactions.filter(tx =>
+      Math.abs(tx.amount - savedUserTransaction.amount) < 0.01
+    );
 
+    // Log detalles de cada transacción candidata
+    sameAmountTransactions.forEach(tx => {
+      console.log(`[${opId}] DEPURACIÓN: Analizando transacción MP ID: ${tx.id}`);
+      console.log(`  - Tipo: ${tx.type === 'deposit' ? 'Depósito ✓' : 'Otro X'}`);
+      console.log(`  - Estado: ${tx.status === 'Pendiente' ? 'Pendiente ✓' : tx.status + ' X'}`);
+      console.log(`  - Ya usada: ${!tx.relatedUserTransactionId ? 'No ✓' : 'Sí X'}`);
+      console.log(`  - Monto: ${tx.amount} (Diff: ${Math.abs(tx.amount - savedUserTransaction.amount)})`);
+      console.log(`  - CBU Match: ${this.matchCbuWithMp(tx, savedUserTransaction.cbu) ? 'Sí ✓' : 'No X'}`);
+      console.log(`  - Email User: ${savedUserTransaction.payer_email}`);
+      console.log(`  - Email MP: ${tx.payer_email}`);
+      console.log(`  - Email Match: ${tx.payer_email && savedUserTransaction.payer_email &&
+        tx.payer_email.toLowerCase() === savedUserTransaction.payer_email.toLowerCase() ? 'Sí ✓' : 'No X'}`);
+      console.log(`  - Fecha cercana: ${tx.date_created && savedUserTransaction.date_created &&
+        this.isDateCloseEnough(tx.date_created, savedUserTransaction.date_created) ? 'Sí ✓' : 'No X'}`);
+    });
 
     // --- VALIDACIÓN DE CBU CON FILTRO DE OFICINA ---
     // Pasar el CBU del payload Y el idAgent (oficina) a isValidCbu
