@@ -968,7 +968,7 @@ export class IpnService implements OnModuleInit {
       account.wallet === 'mercadopago' &&
       account.status === 'active' &&
       account.receiver_id && // Verificar que receiver_id existe
-      account.receiver_id.toString() === receiverId
+      account.receiver_id.toString() === receiverIdStr
     );
 
     if (accountByDirectMatch) {
