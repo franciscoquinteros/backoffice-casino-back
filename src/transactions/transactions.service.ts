@@ -665,6 +665,9 @@ export class IpnService implements OnModuleInit {
 
     // 1. Buscar en las transacciones locales (recibidas previamente por IPN)
     const matchingLocalMpTx = this.transactions.find(mpTx => {
+      if (mpTx.id.toString() === savedUserTransaction.id.toString()) {
+        return false;
+      }
       // Buscamos una transacción que represente un pago de Mercado Pago procesado
       return (
         mpTx.type === 'deposit' && // Es una transacción de tipo 'deposit' (originada por MP IPN)
