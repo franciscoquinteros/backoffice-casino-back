@@ -494,11 +494,13 @@ export class IpnService implements OnModuleInit {
         await this.updateTransactionInfo(matchingUserDeposit.id.toString(), {
           reference_transaction: savedMpTransaction.id.toString(),
           description: `Depósito consolidado en transacción MP ID: ${savedMpTransaction.id}`,
+          office: matchingUserDeposit.office || savedMpTransaction.office
         });
 
         await this.updateTransactionInfo(savedMpTransaction.id.toString(), {
           relatedUserTransactionId: matchingUserDeposit.id.toString(),
-          description: `Transacción validada con depósito externo ID: ${matchingUserDeposit.id}`
+          description: `Transacción validada con depósito externo ID: ${matchingUserDeposit.id}`,
+          office: savedMpTransaction.office || matchingUserDeposit.office
         });
 
         console.log(`[IPN] ${savedMpTransaction.id}: Depósito externo ${matchingUserDeposit.id} marcado como Consolidado.`);
@@ -800,7 +802,8 @@ export class IpnService implements OnModuleInit {
       // 2. Establecer la referencia al ID del pago de Mercado Pago en el depósito del usuario
       const updateInfo: any = {
         referenceTransaction: matchedMpPayment.id.toString(), // En la transacción del usuario, guardamos el ID del pago MP (asegurar string)
-        description: `Depósito validado automáticamente con MP Pago ID: ${matchedMpPayment.id}`
+        description: `Depósito validado automáticamente con MP Pago ID: ${matchedMpPayment.id}`,
+        office: savedUserTransaction.office || matchedMpPayment.office || depositData.idAgent
       };
       // Copiar algunos datos del pago MP a la transacción del usuario si son más precisos o faltan
       if ('payer_id' in matchedMpPayment && matchedMpPayment.payer_id) updateInfo.payerId = matchedMpPayment.payer_id.toString();
@@ -819,7 +822,7 @@ export class IpnService implements OnModuleInit {
         await this.updateTransactionInfo(matchedMpPayment.id.toString(), {
           relatedUserTransactionId: savedUserTransaction.id.toString(), // En la transacción de MP, guardamos el ID del depósito de usuario
           description: (matchedMpPayment.description || '') + ` (Valida depósito usuario ID: ${savedUserTransaction.id})`, // Añadir una nota
-          office: matchedMpPayment.office || savedUserTransaction.office
+          office: matchedMpPayment.office || savedUserTransaction.office || depositData.idAgent
         });
         console.log(`[${opId}] Pago MP local ID ${matchedMpPayment.id} marcado como usado.`);
       }
