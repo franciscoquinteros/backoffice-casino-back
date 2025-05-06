@@ -115,6 +115,7 @@ export interface PaymentData {
   } | null;
   receiver_id?: string;
   bank_transfer_id?: number;
+  office?: string;
   transaction_details?: {
     acquirer_reference?: string | null;
     bank_transfer_id?: number;

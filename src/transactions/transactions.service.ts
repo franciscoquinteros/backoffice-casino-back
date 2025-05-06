@@ -818,7 +818,8 @@ export class IpnService implements OnModuleInit {
       if (!matchedFromApi && 'id' in matchedMpPayment) { // Si el match fue local (ya tenemos el objeto Transaction completo)
         await this.updateTransactionInfo(matchedMpPayment.id.toString(), {
           relatedUserTransactionId: savedUserTransaction.id.toString(), // En la transacción de MP, guardamos el ID del depósito de usuario
-          description: (matchedMpPayment.description || '') + ` (Valida depósito usuario ID: ${savedUserTransaction.id})` // Añadir una nota
+          description: (matchedMpPayment.description || '') + ` (Valida depósito usuario ID: ${savedUserTransaction.id})`, // Añadir una nota
+          office: matchedMpPayment.office || savedUserTransaction.office
         });
         console.log(`[${opId}] Pago MP local ID ${matchedMpPayment.id} marcado como usado.`);
       }
