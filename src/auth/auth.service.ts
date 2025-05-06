@@ -1,18 +1,20 @@
 // src/auth/auth.service.ts (NESTJS BACKEND)
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
-import { UserService } from '../users/user.service'; // Ajusta la ruta
+import { Injectable, UnauthorizedException, Logger, NotFoundException } from '@nestjs/common'; // <-- Añade NotFoundException
+import { UserService } from '../users/user.service';
 import * as bcrypt from 'bcrypt';
-import { JwtService } from '@nestjs/jwt'; // <--- 1. Importa JwtService
+import { JwtService } from '@nestjs/jwt';
+import { OfficeService } from 'src/office/office.service'; // <-- 1. Importa OfficeService (ajusta ruta)
+import { User } from '../users/entities/user.entity'; // Importa la entidad User
 
-// Asegúrate que este tipo (o tu UserEntity) incluya officeId y username/name
-interface UserWithOffice {
+// Interfaz ajustada para claridad y consistencia
+// Asegúrate que userService.findByEmail devuelva estas propiedades
+interface ValidatedUser {
     id: string | number;
     email: string;
-    username: string; // O 'name' si así se llama en tu entidad
-    password?: string;
+    username: string;
     role: string;
     status: string;
-    office: string; // <-- Campo clave
+    office: string; // ID de la oficina REAL del usuario (string)
 }
 
 @Injectable()
@@ -20,76 +22,99 @@ export class AuthService {
     private readonly logger = new Logger(AuthService.name);
     constructor(
         private readonly userService: UserService,
-        private readonly jwtService: JwtService, // <--- 2. Inyecta JwtService
-    ) { }
-
-    async validateUser(email: string, passwordInput: string): Promise<UserWithOffice> {
-        this.logger.debug(`Validating user: ${email}`);
-        const user = await this.userService.findByEmail(email); // Asume que devuelve UserWithOffice (¡CON officeId!)
-
-        if (!user) {
-            this.logger.warn(`Validation failed: User ${email} not found.`);
-            throw new UnauthorizedException('Invalid credentials');
-        }
-        if (!user.password) {
-            this.logger.error(`Validation error: User ${email} has no password hash.`);
-            throw new UnauthorizedException('Authentication configuration error.');
-        }
-
-        const isPasswordValid = await bcrypt.compare(passwordInput, user.password);
-
-        if (!isPasswordValid) {
-            this.logger.warn(`Validation failed: Invalid password for user ${email}.`);
-            throw new UnauthorizedException('Invalid credentials');
-        }
-
-        if (user.status === 'inactive') {
-            this.logger.warn(`Validation failed: User ${email} is inactive.`);
-            throw new UnauthorizedException('User account is inactive');
-        }
-
-        // Verifica que officeId exista ANTES de devolver el usuario validado
-        if (!user.office) {
-            this.logger.error(`Validation error: User ${email} is valid but has no officeId assigned.`);
-            throw new UnauthorizedException('User account is missing office assignment.');
-        }
-
-        this.logger.debug(`User ${email} validated successfully.`);
-        // Devolvemos el usuario validado (sin el password hash)
-        const { password, ...result } = user;
-        return result as UserWithOffice;
+        private readonly jwtService: JwtService,
+        private readonly officeService: OfficeService // <-- 2. Inyecta OfficeService
+    ) {
+         // Verifica logger en constructor
+         if (!this.logger) { console.error("CRITICAL: Logger is UNDEFINED in AuthService constructor!"); }
+         else { this.logger.log("AuthService Initialized - Logger OK."); }
     }
 
-    // --- 3. AÑADE EL MÉTODO LOGIN ---
+    async validateUser(email: string, passwordInput: string): Promise<ValidatedUser> { // Cambiado tipo retorno
+        // ... (tu lógica de validación existente está bien) ...
+        // ... (busca usuario, compara password, verifica status y que user.office exista) ...
+         const user = await this.userService.findByEmail(email);
+         if (!user || !user.password || !user.office || user.status === 'inactive' || !(await bcrypt.compare(passwordInput, user.password))) {
+              // Simplifica el manejo de errores de validación
+             this.logger.warn(`Validation failed for user: ${email}`);
+              throw new UnauthorizedException('Invalid credentials or inactive user');
+         }
+         this.logger.debug(`User ${email} validated successfully.`);
+         const { password, ...result } = user; // Quita el password
+         // Asegúrate que el objeto devuelto coincida con ValidatedUser
+         return {
+            id: result.id,
+            email: result.email,
+            username: result.username, // o result.name
+            role: result.role,
+            status: result.status,
+            office: result.office // ID de oficina real
+         };
+    }
+
     /**
      * Genera el token JWT y estructura la respuesta final para el login.
-     * @param user - El objeto usuario YA VALIDADO por validateUser (debe incluir officeId)
-     * @returns Objeto con accessToken y datos del usuario anidados.
+     * @param user - El objeto usuario YA VALIDADO por validateUser
+     * @param requestedOfficeId - El ID de oficina opcional solicitado desde el login form (solo para superadmin)
+     * @returns Objeto con accessToken y datos del usuario para NextAuth.
      */
-    async login(user: UserWithOffice) {
-        this.logger.debug(`Generating JWT for user: ${user.email} in office ${user.office}`);
+    async login(
+        user: ValidatedUser,
+        requestedOfficeId?: string // <-- 3. Acepta el ID de oficina solicitado
+    ): Promise<{ accessToken: string; user: any }> {
+
+        let officeIdToUseInToken: string = user.office; // 4. Por defecto, usa la oficina REAL del usuario
+
+        // --- Lógica de Super Admin ---
+        if (user.role === 'superadmin' && requestedOfficeId && requestedOfficeId !== user.office) {
+            // 5. Si es superadmin y pidió una oficina DIFERENTE a la suya
+            try {
+                // Valida que la oficina solicitada exista en la BD
+                this.logger.debug(`Superadmin ${user.id} requested office ${requestedOfficeId}. Validating...`);
+                const targetOffice = await this.officeService.findOne(+requestedOfficeId); // Busca por ID numérico
+                if (targetOffice) {
+                    this.logger.log(`Superadmin ${user.id} login validated for viewing office ${requestedOfficeId} (${targetOffice.name})`);
+                    officeIdToUseInToken = requestedOfficeId; // Usa la oficina solicitada
+                } else {
+                     this.logger.warn(`Superadmin ${user.id} requested non-existent office ${requestedOfficeId}. Using own office ${user.office}.`);
+                     // Si no existe, se queda con la suya por seguridad
+                }
+            } catch (error) {
+                 if (error instanceof NotFoundException) {
+                      this.logger.warn(`Superadmin ${user.id} requested non-existent office ${requestedOfficeId}. Using own office ${user.office}.`);
+                 } else {
+                      this.logger.error(`Error validating requested office ${requestedOfficeId}: ${error.message}. Using own office ${user.office}.`);
+                 }
+                 // Si hay error validando, usa la oficina propia del superadmin
+            }
+        } else if (requestedOfficeId && requestedOfficeId !== user.office) {
+             // Si NO es superadmin pero intenta especificar otra oficina (no debería pasar si el frontend lo oculta bien)
+             this.logger.warn(`Non-admin user ${user.id} tried to log into office ${requestedOfficeId}. Denying and using own office ${user.office}.`);
+             // Ignoramos la petición y usamos su oficina real
+        }
+        // --- Fin Lógica Super Admin ---
+
+        this.logger.debug(`Generating JWT for user: ${user.email}, effective officeId: ${officeIdToUseInToken}`);
         const payload = {
-            sub: user.id, // Subject (ID del usuario)
+            sub: user.id,
             email: user.email,
             role: user.role,
-            officeId: user.office, // Incluye la oficina en el payload del token
+            officeId: officeIdToUseInToken, // <-- 6. USA LA OFICINA DETERMINADA
         };
-
-        const accessToken = this.jwtService.sign(payload); // Firma el token
+        const accessToken = this.jwtService.sign(payload);
         this.logger.debug(`JWT generated for user: ${user.email}`);
 
-        // Estructura la respuesta EXACTAMENTE como la necesita NextAuth authorize
+        // Devuelve la estructura que NextAuth necesita
         return {
             accessToken: accessToken,
-            user: {
+            user: { // Asegúrate que este objeto coincida con tu interfaz User de next-auth.d.ts
                 id: user.id.toString(),
                 email: user.email,
                 name: user.username,   // O user.name
                 role: user.role,
-                status: user.status,   // Status es opcional aquí, pero lo incluimos como estaba antes
-                officeId: user.office, // Incluye officeId aquí también para el frontend
+                officeId: officeIdToUseInToken, // <-- 7. DEVUELVE LA OFICINA USADA en el token
+                // status: user.status, // Probablemente no necesario en sesión NextAuth
             },
         };
     }
-    // --- FIN DEL MÉTODO LOGIN ---
 }

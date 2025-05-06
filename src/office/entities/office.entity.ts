@@ -1,9 +1,9 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, Column, CreateDateColumn, UpdateDateColumn, PrimaryColumn } from 'typeorm';
 
 @Entity()
 export class Office {
-    @PrimaryGeneratedColumn({ type: 'bigint' })
-    id: number;
+    @PrimaryColumn({ type: 'varchar', length: 50, unique: true }) // Ajusta el tipo y longitud
+    id: string;
 
     @Column({ name: 'name', nullable: false })
     name: string;

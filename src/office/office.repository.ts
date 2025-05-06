@@ -5,6 +5,12 @@ import { Office } from './entities/office.entity';
 
 @Injectable()
 export class OfficeRepository {
+  save(newOfficeEntity: Promise<Office>): Office | PromiseLike<Office> {
+    throw new Error('Method not implemented.');
+  }
+  find(arg0: { where: { status: string; }; order: { name: string; }; }): Office[] | PromiseLike<Office[]> {
+    throw new Error('Method not implemented.');
+  }
   constructor(
     @InjectRepository(Office)
     private officeRepository: Repository<Office>,

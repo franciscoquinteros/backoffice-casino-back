@@ -13,7 +13,7 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger'; // Para do
 @UseGuards(ThrottlerGuard)
 export class AuthController {
     private readonly logger = new Logger(AuthController.name);
-    constructor(private readonly authService: AuthService) {}
+    constructor(private readonly authService: AuthService) { }
 
     @Post('login')
     @HttpCode(HttpStatus.OK) // Un login exitoso suele ser 200 OK
@@ -21,31 +21,24 @@ export class AuthController {
     @ApiResponse({ status: 200, description: 'Authentication successful.' /*, type: LoginResponseDto */ }) // Define un DTO si quieres
     @ApiResponse({ status: 401, description: 'Unauthorized (Invalid Credentials / Inactive User).' })
     @ApiResponse({ status: 429, description: 'Too Many Requests.' })
-    async login(@Body() loginDto: LoginDto) { // Recibe email/password
-        this.logger.debug(`Login attempt for email: ${loginDto.email}`);
+    async login(@Body() loginDto: LoginDto) { // loginDto ahora tiene { email, password, viewOfficeId? }
+        this.logger.debug(`Login attempt for email: ${loginDto.email}${loginDto.viewOfficeId ? ` (requesting view for office ${loginDto.viewOfficeId})` : ''}`);
         try {
-            // --- PASO 1: Validar usuario ---
             const validatedUser = await this.authService.validateUser(loginDto.email, loginDto.password);
-            // Si validateUser falla, lanzará UnauthorizedException y no continuará
-
             this.logger.debug(`User ${loginDto.email} validated, proceeding to generate token.`);
 
-            // --- PASO 2: Generar token y respuesta ---
-            // Llama al nuevo método login del servicio pasando el usuario validado
-            const loginResult = await this.authService.login(validatedUser);
+            // --- PASA viewOfficeId (si existe) AL SERVICIO ---
+            const loginResult = await this.authService.login(validatedUser, loginDto.viewOfficeId); // <-- Cambio aquí
 
-            this.logger.log(`User ${loginDto.email} logged in successfully.`);
-            // Devuelve el resultado de authService.login ({ accessToken, user: {...} })
+            this.logger.log(`User ${loginDto.email} logged in successfully (effective office: ${loginResult.user.officeId}).`);
             return loginResult;
 
         } catch (error) {
-            // Loguear el error que ocurrió (validateUser ya loguea sus propios errores)
+            // ... (tu manejo de error actual) ...
             if (!(error instanceof UnauthorizedException)) {
-                 // Loguear errores inesperados
-                 this.logger.error(`Unexpected error during login for ${loginDto.email}: ${error.message}`, error.stack);
+                this.logger.error(`Unexpected error during login for ${loginDto.email}: ${error.message}`, error.stack);
             }
-            // Re-lanzar la excepción para que NestJS la maneje y devuelva el status HTTP correcto (ej: 401)
-            throw error;
+            throw error; // Re-lanza para que NestJS devuelva el status correcto
         }
     }
 }

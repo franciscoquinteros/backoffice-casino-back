@@ -14,6 +14,9 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy'; // <-- 1. Importa la Estrategia
+import { OfficeService } from 'src/office/office.service';
+import { OfficeModule } from 'src/office/office.module';
+import { RolesGuard } from './guards/roles.guard';
 
 @Module({
   imports: [
@@ -21,6 +24,7 @@ import { JwtStrategy } from '../auth/strategies/jwt.strategy'; // <-- 1. Importa
     ConfigModule,
     TypeOrmModule.forFeature([ApiKey]),
     ApiKeysModule,
+    OfficeModule,
     // --- CONFIGURACIÓN JWT ---
     PassportModule.register({ defaultStrategy: 'jwt' }), // Correcto
     JwtModule.registerAsync({                           // Correcto
@@ -43,6 +47,7 @@ import { JwtStrategy } from '../auth/strategies/jwt.strategy'; // <-- 1. Importa
     ApiKeyService,
     JwtAuthGuard,
     JwtStrategy,  // <--- 2. Añade la Estrategia a los providers
+    RolesGuard
   ],
   controllers: [AuthController, ApiKeyController],
   // Exporta lo necesario

@@ -121,24 +121,24 @@ export class TransactionsController {
 
     // Verificar concurrencia
     if (!userOffice) { throw new ForbiddenException('User office information is missing.'); }
-        if (this.processingTransactions.has(transactionId)) { /*...*/ }
-        this.processingTransactions.add(transactionId);
+    if (this.processingTransactions.has(transactionId)) { /*...*/ }
+    this.processingTransactions.add(transactionId);
 
-        try {
-          // 1. Obtener la transacción por su ID
-          const originalTransaction = await this.ipnService.getTransactionById(transactionId);
-          if (!originalTransaction) { /*...*/ throw new HttpException('Not Found', HttpStatus.NOT_FOUND); }
-          const transactionOffice = originalTransaction.office; // Oficina de la transacción
+    try {
+      // 1. Obtener la transacción por su ID
+      const originalTransaction = await this.ipnService.getTransactionById(transactionId);
+      if (!originalTransaction) { /*...*/ throw new HttpException('Not Found', HttpStatus.NOT_FOUND); }
+      const transactionOffice = originalTransaction.office; // Oficina de la transacción
 
-          // 2. AUTORIZACIÓN: Comparar oficina del usuario con la de la transacción
-           if (!transactionOffice) { throw new ForbiddenException('Transaction is not assigned to an office.'); }
-          if (userOffice !== transactionOffice) {
-              // if (!request.user.roles?.includes('admin')) {
-                  console.warn(`[${opId}] FORBIDDEN: User ${userId} (Office: ${userOffice}) attempted action on transaction ${transactionId} from office ${transactionOffice}.`);
-                  throw new ForbiddenException(`Forbidden action on transaction from office ${transactionOffice}.`);
-              // }
-          }
-           console.log(`[${opId}] AUTHORIZED: User ${userId} on transaction ${transactionId} in office ${transactionOffice}.`);
+      // 2. AUTORIZACIÓN: Comparar oficina del usuario con la de la transacción
+      if (!transactionOffice) { throw new ForbiddenException('Transaction is not assigned to an office.'); }
+      if (userOffice !== transactionOffice) {
+        // if (!request.user.roles?.includes('admin')) {
+        console.warn(`[${opId}] FORBIDDEN: User ${userId} (Office: ${userOffice}) attempted action on transaction ${transactionId} from office ${transactionOffice}.`);
+        throw new ForbiddenException(`Forbidden action on transaction from office ${transactionOffice}.`);
+        // }
+      }
+      console.log(`[${opId}] AUTHORIZED: User ${userId} on transaction ${transactionId} in office ${transactionOffice}.`);
 
       // 3. Verificar estado previo
       if (originalTransaction.status === 'Aceptado') {
@@ -371,23 +371,21 @@ export class TransactionsController {
 
       // 5. Lógica de envío al Proxy de Retiros
       try {
-        // Mapear Payload para el proxy de retiros
-        const proxyPayload: any = {
+        // Mapear Payload para el proxy de retiros - SIMPLIFICADO como en acceptDeposit
+        const proxyPayload = {
           user_id: parseInt(processingTransaction.idCliente?.toString() || '0', 10),
           amount: processingTransaction.amount,
-          transaction_id: processingTransaction.id.toString(),
+          transaction_id: processingTransaction.id.toString()
         };
-        // Añadir destino (CBU/Wallet)
-        if (processingTransaction.cbu) { /* ... */ }
-        else if (processingTransaction.wallet_address) { /* ... */ }
-        else { throw new HttpException('Missing destination', HttpStatus.BAD_REQUEST); }
-        // Validar payload
-        if (isNaN(proxyPayload.user_id) || !proxyPayload.amount || !proxyPayload.transaction_id || !proxyPayload.destination_value) {
-          throw new HttpException('Incomplete data for withdraw proxy', HttpStatus.BAD_REQUEST);
+
+        // Validación simplificada, igual que en acceptDeposit
+        if (!proxyPayload.user_id || typeof proxyPayload.amount !== 'number' || !proxyPayload.transaction_id) {
+          console.error(`[${opId}] BAD REQUEST: Incomplete data for proxy payload: ${JSON.stringify(proxyPayload)}`);
+          throw new HttpException('Incomplete transaction data for proxy processing', HttpStatus.BAD_REQUEST);
         }
 
         console.log(`[${opId}] Sending to withdraw proxy, payload:`, JSON.stringify(proxyPayload));
-        const proxyResponse = await axios.post('http://18.216.231.42:8080/withdraw', proxyPayload); // <<< URL CORRECTA
+        const proxyResponse = await axios.post('http://18.216.231.42:8080/withdraw', proxyPayload);
         console.log(`[${opId}] Withdraw proxy response:`, JSON.stringify(proxyResponse.data));
 
         // 6. Procesar respuesta y actualizar estado final
