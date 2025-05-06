@@ -408,7 +408,7 @@ export class IpnService implements OnModuleInit {
     console.log('Respuesta completa de la API de Mercado Pago:', JSON.stringify(apiData, null, 2)); // Descomentar para debug completo
 
     // Determinar la cuenta asociada basada en el receiver_id de MP
-    const associatedAccount = this.findAccountByReceiverId(apiData.collector_id || apiData.receiver_id);
+    const associatedAccount = this.findAccountByReceiverId(apiData.collector?.id || apiData.receiver_id);
     const cbuFromMp = associatedAccount?.cbu; // El CBU asociado a la cuenta receptora en MP
 
     // Crear o actualizar la transacción local de Mercado Pago
@@ -425,7 +425,7 @@ export class IpnService implements OnModuleInit {
     mpTransaction.date_created = apiData.date_created;
     mpTransaction.description = apiData.description || 'Pago recibido vía IPN - Pendiente de validación';
     mpTransaction.payment_method_id = apiData.payment_method_id;
-    mpTransaction.payer_id = apiData.payer?.id?.toString() || null;
+    mpTransaction.payer_id = apiData.payer_id?.toString() || null;
     mpTransaction.payer_email = apiData.payer?.email || null;
     mpTransaction.payer_identification = apiData.payer?.identification || null;
     mpTransaction.external_reference = apiData.external_reference || null;
