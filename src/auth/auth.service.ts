@@ -25,31 +25,31 @@ export class AuthService {
         private readonly jwtService: JwtService,
         private readonly officeService: OfficeService // <-- 2. Inyecta OfficeService
     ) {
-         // Verifica logger en constructor
-         if (!this.logger) { console.error("CRITICAL: Logger is UNDEFINED in AuthService constructor!"); }
-         else { this.logger.log("AuthService Initialized - Logger OK."); }
+        // Verifica logger en constructor
+        if (!this.logger) { console.error("CRITICAL: Logger is UNDEFINED in AuthService constructor!"); }
+        else { this.logger.log("AuthService Initialized - Logger OK."); }
     }
 
     async validateUser(email: string, passwordInput: string): Promise<ValidatedUser> { // Cambiado tipo retorno
         // ... (tu lógica de validación existente está bien) ...
         // ... (busca usuario, compara password, verifica status y que user.office exista) ...
-         const user = await this.userService.findByEmail(email);
-         if (!user || !user.password || !user.office || user.status === 'inactive' || !(await bcrypt.compare(passwordInput, user.password))) {
-              // Simplifica el manejo de errores de validación
-             this.logger.warn(`Validation failed for user: ${email}`);
-              throw new UnauthorizedException('Invalid credentials or inactive user');
-         }
-         this.logger.debug(`User ${email} validated successfully.`);
-         const { password, ...result } = user; // Quita el password
-         // Asegúrate que el objeto devuelto coincida con ValidatedUser
-         return {
+        const user = await this.userService.findByEmail(email);
+        if (!user || !user.password || !user.office || user.status === 'inactive' || !(await bcrypt.compare(passwordInput, user.password))) {
+            // Simplifica el manejo de errores de validación
+            this.logger.warn(`Validation failed for user: ${email}`);
+            throw new UnauthorizedException('Invalid credentials or inactive user');
+        }
+        this.logger.debug(`User ${email} validated successfully.`);
+        const { password, ...result } = user; // Quita el password
+        // Asegúrate que el objeto devuelto coincida con ValidatedUser
+        return {
             id: result.id,
             email: result.email,
             username: result.username, // o result.name
             role: result.role,
             status: result.status,
             office: result.office // ID de oficina real
-         };
+        };
     }
 
     /**
@@ -71,26 +71,26 @@ export class AuthService {
             try {
                 // Valida que la oficina solicitada exista en la BD
                 this.logger.debug(`Superadmin ${user.id} requested office ${requestedOfficeId}. Validating...`);
-                const targetOffice = await this.officeService.findOne(+requestedOfficeId); // Busca por ID numérico
+                const targetOffice = await this.officeService.findOne(requestedOfficeId); // Ya es string, no necesita conversión
                 if (targetOffice) {
                     this.logger.log(`Superadmin ${user.id} login validated for viewing office ${requestedOfficeId} (${targetOffice.name})`);
                     officeIdToUseInToken = requestedOfficeId; // Usa la oficina solicitada
                 } else {
-                     this.logger.warn(`Superadmin ${user.id} requested non-existent office ${requestedOfficeId}. Using own office ${user.office}.`);
-                     // Si no existe, se queda con la suya por seguridad
+                    this.logger.warn(`Superadmin ${user.id} requested non-existent office ${requestedOfficeId}. Using own office ${user.office}.`);
+                    // Si no existe, se queda con la suya por seguridad
                 }
             } catch (error) {
-                 if (error instanceof NotFoundException) {
-                      this.logger.warn(`Superadmin ${user.id} requested non-existent office ${requestedOfficeId}. Using own office ${user.office}.`);
-                 } else {
-                      this.logger.error(`Error validating requested office ${requestedOfficeId}: ${error.message}. Using own office ${user.office}.`);
-                 }
-                 // Si hay error validando, usa la oficina propia del superadmin
+                if (error instanceof NotFoundException) {
+                    this.logger.warn(`Superadmin ${user.id} requested non-existent office ${requestedOfficeId}. Using own office ${user.office}.`);
+                } else {
+                    this.logger.error(`Error validating requested office ${requestedOfficeId}: ${error.message}. Using own office ${user.office}.`);
+                }
+                // Si hay error validando, usa la oficina propia del superadmin
             }
         } else if (requestedOfficeId && requestedOfficeId !== user.office) {
-             // Si NO es superadmin pero intenta especificar otra oficina (no debería pasar si el frontend lo oculta bien)
-             this.logger.warn(`Non-admin user ${user.id} tried to log into office ${requestedOfficeId}. Denying and using own office ${user.office}.`);
-             // Ignoramos la petición y usamos su oficina real
+            // Si NO es superadmin pero intenta especificar otra oficina (no debería pasar si el frontend lo oculta bien)
+            this.logger.warn(`Non-admin user ${user.id} tried to log into office ${requestedOfficeId}. Denying and using own office ${user.office}.`);
+            // Ignoramos la petición y usamos su oficina real
         }
         // --- Fin Lógica Super Admin ---
 

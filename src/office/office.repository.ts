@@ -14,7 +14,7 @@ export class OfficeRepository {
   constructor(
     @InjectRepository(Office)
     private officeRepository: Repository<Office>,
-  ) {}
+  ) { }
 
   // Métodos para interactuar con la base de datos
   findAll() {
@@ -22,7 +22,7 @@ export class OfficeRepository {
   }
 
   findOne(id: number) {
-    return this.officeRepository.findOne({ where: { id } });
+    return this.officeRepository.findOne({ where: { id: id.toString() } });
   }
 
   create(office: Partial<Office>) {

@@ -61,7 +61,7 @@ export class ReportService {
     async generateOfficeReport(officeId: number) {
         try {
             // Obtener información básica de la oficina
-            const office = await this.officeRepository.findOne({ where: { id: officeId } });
+            const office = await this.officeRepository.findOne({ where: { id: officeId.toString() } });
             if (!office) throw new Error(`Oficina con ID ${officeId} no encontrada`);
 
             // Obtener todas las métricas para esta oficina
@@ -151,7 +151,7 @@ export class ReportService {
 
     private async getOfficeIdByName(officeName: string): Promise<number | null> {
         const office = await this.officeRepository.findOne({ where: { name: officeName } });
-        return office ? office.id : null;
+        return office ? parseInt(office.id) : null;
     }
 
     private async getUsersByOfficeId(officeId: number, selectFields?: (keyof User)[]): Promise<User[]> {
@@ -167,7 +167,7 @@ export class ReportService {
     // Método auxiliar para obtener el nombre de la oficina a partir del ID
     private async getOfficeNameById(officeId: number): Promise<string | null> {
         console.log(`[ReportService] getOfficeNameById: Looking for ID ${officeId}`); // <-- Log
-        const office = await this.officeRepository.findOne({ where: { id: officeId } });
+        const office = await this.officeRepository.findOne({ where: { id: officeId.toString() } });
         console.log(`[ReportService] getOfficeNameById: Found office: ${office?.name}`); // <-- Log
         return office ? office.name : null;
     }
@@ -252,7 +252,7 @@ export class ReportService {
     async getResponseTimeByAgentForOffice(officeId: number) {
         try {
             // Obtener el nombre de la oficina
-            const office = await this.officeRepository.findOne({ where: { id: officeId } });
+            const office = await this.officeRepository.findOne({ where: { id: officeId.toString() } });
             if (!office) throw new Error(`Oficina con ID ${officeId} no encontrada`);
 
             // Obtener usuarios de esta oficina
@@ -349,7 +349,7 @@ export class ReportService {
     async getLoginActivityForOffice(officeId: number) {
         try {
             // Obtener el nombre de la oficina
-            const office = await this.officeRepository.findOne({ where: { id: officeId } });
+            const office = await this.officeRepository.findOne({ where: { id: officeId.toString() } });
             if (!office) throw new Error(`Oficina con ID ${officeId} no encontrada`);
 
             // Obtener usuarios de esta oficina con lastLoginDate
@@ -424,7 +424,7 @@ export class ReportService {
 
         try {
             // Obtener el nombre de la oficina
-            const office = await this.officeRepository.findOne({ where: { id: officeId } });
+            const office = await this.officeRepository.findOne({ where: { id: officeId.toString() } });
             if (!office) throw new Error(`Oficina con ID ${officeId} no encontrada`);
 
             // Obtener usuarios de esta oficina
@@ -571,7 +571,7 @@ export class ReportService {
     async getConversationStatusDistributionForOffice(officeId: number) {
         try {
             // Obtener el nombre de la oficina
-            const office = await this.officeRepository.findOne({ where: { id: officeId } });
+            const office = await this.officeRepository.findOne({ where: { id: officeId.toString() } });
             if (!office) throw new Error(`Oficina con ID ${officeId} no encontrada`);
 
             // Obtener usuarios de esta oficina
@@ -645,7 +645,7 @@ export class ReportService {
         try {
             const allTickets = await this.zendeskService.getAllTickets() as TicketResponse[];
 
-            const office = await this.officeRepository.findOne({ where: { id: officeId } });
+            const office = await this.officeRepository.findOne({ where: { id: officeId.toString() } });
             if (!office) throw new Error(`Oficina con ID ${officeId} no encontrada`);
 
             // Filtrar tickets para la oficina específica
