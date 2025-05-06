@@ -241,6 +241,7 @@ export class IpnService implements OnModuleInit {
     const allAccounts = this.accounts;
     console.log('Total de cuentas disponibles:', allAccounts.length);
 
+
     const mpAccounts = allAccounts.filter(acc => acc.wallet === 'mercadopago');
     console.log('Cuentas de Mercado Pago:', mpAccounts.length);
 
@@ -261,8 +262,15 @@ export class IpnService implements OnModuleInit {
     }
 
     const tokens = accountsWithToken.map(acc => acc.mp_access_token);
+    console.log('Tokens encontrados:', accountsWithToken.map(acc => ({
+      name: acc.name,
+      token_last_10: acc.mp_access_token.substring(acc.mp_access_token.length - 10)
+    })));
     return [...new Set(tokens)];
+
   }
+
+
 
   private isDateCloseEnough(date1Str: string | undefined, date2Str: string | undefined): boolean {
     if (!date1Str || !date2Str) return false;
@@ -351,7 +359,7 @@ export class IpnService implements OnModuleInit {
           continue;
         } else {
           // Para otros errores, no intentamos más tokens, asumimos un problema general
-          break;
+          continue;
         }
       }
     }
@@ -663,7 +671,7 @@ export class IpnService implements OnModuleInit {
     // Obtenemos un token para poder consultar la API si es necesario.
     // Intentamos usar el token asociado al CBU del usuario si existe, o uno cualquiera si no.
     const tokenForApiSearch = this.getAccessTokenByCbu(savedUserTransaction.cbu) || this.getAllAccessTokens()[0];
-
+    console.log(`[${opId}] Token para búsqueda de pagos MP: ${tokenForApiSearch ? tokenForApiSearch.substring(0, 10) : 'Ninguno disponible'}`);
 
     // 1. Buscar en las transacciones locales (recibidas previamente por IPN)
     const matchingLocalMpTx = this.transactions.find(mpTx => {
