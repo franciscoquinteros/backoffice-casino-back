@@ -783,7 +783,7 @@ export class IpnService implements OnModuleInit {
       // Agregar los campos adicionales
       payer_identification: {
         type: 'name',
-        number: withdrawData.name
+        number: withdrawData.nombreDelTitular
       },
       external_reference: withdrawData.phoneNumber, // Usar phoneNumber como referencia externa
       office: withdrawData.idAgent, // <-- GUARDAR idAgent como 'office'
