@@ -366,32 +366,10 @@ export class IpnService implements OnModuleInit {
 
     if (!successfulResponse) {
       console.error(`[IPN] ${paymentId}: Todos los tokens fallaron al consultar Mercado Pago.`, lastError?.message);
-
-      const existingMpTx = await this.getTransactionById(paymentId.toString());
-
-      if (existingMpTx) {
-        console.warn(`[IPN] ${paymentId}: Transacción ya existe, actualizando estado a Error.`);
-        await this.updateTransactionStatus(existingMpTx.id.toString(), 'Error');
-        await this.updateTransactionInfo(existingMpTx.id.toString(), {
-          description: (existingMpTx.description || '') + ' | Error IPN: Fallo al consultar detalles.'
-        });
-        mpTransaction = existingMpTx;
-      } else {
-        mpTransaction = {
-          id: paymentId,
-          type: 'deposit',
-          amount: 0,
-          status: 'Error',
-          date_created: new Date().toISOString(),
-          description: 'Error IPN: No se pudieron obtener los detalles del pago con ningún token.',
-        };
-        mpTransaction = await this.saveTransaction(mpTransaction);
-      }
-
       return {
         status: 'error',
         message: 'No se pudieron obtener los detalles del pago con ningún token',
-        transaction: mpTransaction
+        transaction: null
       };
     }
 
@@ -408,40 +386,29 @@ export class IpnService implements OnModuleInit {
       transaction_details: apiData.transaction_details
     });
 
+    // Obtener el receiver_id de la respuesta
+    const receiverId = apiData.collector_id || apiData.receiver_id;
+    console.log(`[IPN] ${paymentId}: Receiver ID obtenido: ${receiverId}`);
+
+    // Buscar la cuenta asociada basada en el receiver_id
+    const associatedAccount = this.findAccountByReceiverId(receiverId?.toString());
+    console.log(`[IPN] ${paymentId}: Cuenta asociada encontrada:`, associatedAccount);
+
+    // Obtener la office de la cuenta asociada
+    let officeFromAccount = null;
+    if (associatedAccount) {
+      officeFromAccount = associatedAccount.office || associatedAccount.agent;
+      console.log(`[IPN] ${paymentId}: Office encontrada para receiver_id ${receiverId}: ${officeFromAccount}`);
+    } else {
+      console.warn(`[IPN] ${paymentId}: No se encontró cuenta asociada para receiver_id ${receiverId}`);
+    }
+
     // Obtener el CBU del depósito desde transaction_details
     let depositCbu = null;
     if (apiData.transaction_details?.financial_institution) {
       depositCbu = apiData.transaction_details.financial_institution;
       console.log(`[IPN] ${paymentId}: CBU del depósito encontrado: ${depositCbu}`);
     }
-
-    // Buscar la cuenta asociada basada en el receiver_id de MP
-    const associatedAccount = this.findAccountByReceiverId(apiData.collector?.id || apiData.receiver_id);
-    const cbuFromMp = associatedAccount?.cbu;
-
-    // Obtener la office basada en el CBU
-    let officeFromCbu = null;
-    if (cbuFromMp) {
-      // Buscar la cuenta que coincida con el CBU
-      const accountByCbu = this.accounts.find(acc =>
-        acc.cbu === cbuFromMp &&
-        acc.wallet === 'mercadopago' &&
-        acc.status === 'active'
-      );
-      if (accountByCbu) {
-        officeFromCbu = accountByCbu.office;
-        console.log(`[IPN] ${paymentId}: Office encontrada para CBU ${cbuFromMp}: ${officeFromCbu}`);
-      } else {
-        console.warn(`[IPN] ${paymentId}: No se encontró cuenta activa para CBU ${cbuFromMp}`);
-      }
-    }
-
-    console.log(`[IPN] ${paymentId}: Cuenta asociada encontrada:`, {
-      cbu: cbuFromMp,
-      office: officeFromCbu,
-      accountName: associatedAccount?.name,
-      depositCbu: depositCbu
-    });
 
     const existingMpTx = await this.getTransactionById(apiData.id.toString());
     mpTransaction = existingMpTx ? existingMpTx : { id: apiData.id.toString(), type: 'deposit' } as Transaction;
@@ -455,9 +422,9 @@ export class IpnService implements OnModuleInit {
     mpTransaction.payer_email = apiData.payer?.email || null;
     mpTransaction.payer_identification = apiData.payer?.identification || null;
     mpTransaction.external_reference = apiData.external_reference || null;
-    mpTransaction.receiver_id = apiData.collector_id?.toString() || apiData.receiver_id?.toString() || null;
-    mpTransaction.cbu = depositCbu || cbuFromMp; // Usar el CBU del depósito si está disponible, sino el de la cuenta
-    mpTransaction.office = officeFromCbu;
+    mpTransaction.receiver_id = receiverId?.toString() || null;
+    mpTransaction.cbu = depositCbu || associatedAccount?.cbu;
+    mpTransaction.office = officeFromAccount; // Asignar la office obtenida de la cuenta
 
     const savedMpTransaction = await this.saveTransaction(mpTransaction);
     console.log(`[IPN] DEPURACIÓN: Transacción MP guardada con los siguientes datos:`, {
@@ -612,8 +579,8 @@ export class IpnService implements OnModuleInit {
     // Buscar transacciones pendientes de Mercado Pago que coincidan con los criterios
     const pendingMpTransactions = await this.getTransactions(
       userDepositTransaction.office, // Filtrar por oficina
-      'deposit',                   // Filtrar por tipo
-      'Pending'                    // Filtrar por estado
+      'deposit',                    // Filtrar por tipo
+      'Pending'                     // Filtrar por estado
     );
 
     // Filtrar las transacciones que coinciden con los criterios
@@ -630,8 +597,6 @@ export class IpnService implements OnModuleInit {
         !mpTx.relatedUserTransactionId &&
         typeof mpTx.amount === 'number' && mpTx.amount > 0 &&
         mpTx.amount === savedUserTransaction.amount &&
-        savedUserTransaction.cbu &&
-        this.matchCbuWithMp(mpTx, savedUserTransaction.cbu) &&
         mpTx.payer_email && savedUserTransaction.payer_email &&
         mpTx.payer_email.toLowerCase() === savedUserTransaction.payer_email.toLowerCase() &&
         mpTx.date_created && savedUserTransaction.date_created &&
