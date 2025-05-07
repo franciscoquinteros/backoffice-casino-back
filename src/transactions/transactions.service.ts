@@ -312,7 +312,6 @@ export class IpnService implements OnModuleInit {
     const { topic, id, data } = notification;
     console.log(`[IPN] Procesando notificación de Mercado Pago:`, { topic, id, data });
 
-    // Inicializamos la transacción de Mercado Pago que vamos a guardar/actualizar
     let mpTransaction: Transaction;
     const paymentId = data?.resource || id;
 
@@ -330,7 +329,6 @@ export class IpnService implements OnModuleInit {
         description: 'Error IPN: No hay tokens de acceso configurados para consultar detalles.',
       };
       const savedErrorTransaction = await this.saveTransaction(mpTransaction);
-
       return {
         status: 'error',
         message: 'No hay tokens de acceso configurados para Mercado Pago',
@@ -405,8 +403,16 @@ export class IpnService implements OnModuleInit {
       date_created: apiData.date_created
     });
 
+    // Buscar la cuenta asociada basada en el receiver_id de MP
     const associatedAccount = this.findAccountByReceiverId(apiData.collector?.id || apiData.receiver_id);
     const cbuFromMp = associatedAccount?.cbu;
+    const officeFromAccount = associatedAccount?.office; // Obtener la office de la cuenta
+
+    console.log(`[IPN] ${paymentId}: Cuenta asociada encontrada:`, {
+      cbu: cbuFromMp,
+      office: officeFromAccount,
+      accountName: associatedAccount?.name
+    });
 
     const existingMpTx = await this.getTransactionById(apiData.id.toString());
     mpTransaction = existingMpTx ? existingMpTx : { id: apiData.id.toString(), type: 'deposit' } as Transaction;
@@ -422,7 +428,7 @@ export class IpnService implements OnModuleInit {
     mpTransaction.external_reference = apiData.external_reference || null;
     mpTransaction.receiver_id = apiData.collector_id?.toString() || apiData.receiver_id?.toString() || null;
     mpTransaction.cbu = cbuFromMp;
-    mpTransaction.office = associatedAccount?.office || null;
+    mpTransaction.office = officeFromAccount; // Guardar la office de la cuenta asociada
 
     const savedMpTransaction = await this.saveTransaction(mpTransaction);
     console.log(`[IPN] DEPURACIÓN: Transacción MP guardada con los siguientes datos:`, {
@@ -431,7 +437,7 @@ export class IpnService implements OnModuleInit {
       status: savedMpTransaction.status,
       email: savedMpTransaction.payer_email,
       cbu: savedMpTransaction.cbu,
-      office: savedMpTransaction.office,
+      office: savedMpTransaction.office, // Log de la office guardada
       description: savedMpTransaction.description
     });
 
@@ -467,7 +473,7 @@ export class IpnService implements OnModuleInit {
 
         // 3. Añadir referencias cruzadas entre ambas transacciones
         await this.updateTransactionInfo(matchingExternalDeposit.id.toString(), {
-          reference_transaction: savedMpTransaction.id.toString(),
+          referenceTransaction: savedMpTransaction.id.toString(),
           description: `Depósito match con transacción MP ID: ${savedMpTransaction.id}`,
           office: matchingExternalDeposit.office
         });
@@ -605,7 +611,7 @@ export class IpnService implements OnModuleInit {
 
       // 3. Añadir referencias cruzadas entre ambas transacciones
       await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
-        reference_transaction: matchingMpTransaction.id.toString(),
+        referenceTransaction: matchingMpTransaction.id.toString(),
         description: `Depósito match con transacción MP ID: ${matchingMpTransaction.id}`,
         office: savedUserTransaction.office
       });
