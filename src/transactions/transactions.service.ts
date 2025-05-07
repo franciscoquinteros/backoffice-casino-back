@@ -597,6 +597,12 @@ export class IpnService implements OnModuleInit {
         return false;
       }
 
+      // Verificar que sea una transacción de Mercado Pago (tiene payer_identification)
+      if (!mpTx.payer_identification) {
+        console.log(`[${opId}] Ignorando transacción que no es de Mercado Pago (no tiene payer_identification): ${mpTx.id}`);
+        return false;
+      }
+
       const isMatch = (
         mpTx.type === 'deposit' &&
         mpTx.status === 'Pending' &&
@@ -618,7 +624,8 @@ export class IpnService implements OnModuleInit {
           amount: mpTx.amount,
           email: mpTx.payer_email,
           office: mpTx.office,
-          date_created: mpTx.date_created
+          date_created: mpTx.date_created,
+          payer_identification: mpTx.payer_identification
         });
       } else {
         console.log(`[${opId}] Transacción MP ${mpTx.id} no cumple con los criterios de match:`, {
@@ -628,7 +635,8 @@ export class IpnService implements OnModuleInit {
           amount: mpTx.amount,
           email: mpTx.payer_email,
           office: mpTx.office,
-          date_created: mpTx.date_created
+          date_created: mpTx.date_created,
+          payer_identification: mpTx.payer_identification
         });
       }
 
