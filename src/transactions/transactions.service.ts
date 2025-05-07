@@ -442,6 +442,12 @@ export class IpnService implements OnModuleInit {
       console.log(`[IPN] ${savedMpTransaction.id}: Buscando depósito externo coincidente...`);
 
       const matchingExternalDeposit = this.transactions.find(externalTx => {
+        // Ignorar la misma transacción si ya existe
+        if (externalTx.id === savedMpTransaction.id) {
+          console.log(`[IPN] ${savedMpTransaction.id}: Ignorando transacción con mismo ID: ${externalTx.id}`);
+          return false;
+        }
+
         return (
           externalTx.type === 'deposit' &&
           externalTx.status === 'Pending' &&
