@@ -406,11 +406,27 @@ export class IpnService implements OnModuleInit {
     // Buscar la cuenta asociada basada en el receiver_id de MP
     const associatedAccount = this.findAccountByReceiverId(apiData.collector?.id || apiData.receiver_id);
     const cbuFromMp = associatedAccount?.cbu;
-    const officeFromAccount = associatedAccount?.office; // Obtener la office de la cuenta
+
+    // Obtener la office basada en el CBU
+    let officeFromCbu = null;
+    if (cbuFromMp) {
+      // Buscar la cuenta que coincida con el CBU
+      const accountByCbu = this.accounts.find(acc =>
+        acc.cbu === cbuFromMp &&
+        acc.wallet === 'mercadopago' &&
+        acc.status === 'active'
+      );
+      if (accountByCbu) {
+        officeFromCbu = accountByCbu.office;
+        console.log(`[IPN] ${paymentId}: Office encontrada para CBU ${cbuFromMp}: ${officeFromCbu}`);
+      } else {
+        console.warn(`[IPN] ${paymentId}: No se encontró cuenta activa para CBU ${cbuFromMp}`);
+      }
+    }
 
     console.log(`[IPN] ${paymentId}: Cuenta asociada encontrada:`, {
       cbu: cbuFromMp,
-      office: officeFromAccount,
+      office: officeFromCbu,
       accountName: associatedAccount?.name
     });
 
@@ -428,7 +444,7 @@ export class IpnService implements OnModuleInit {
     mpTransaction.external_reference = apiData.external_reference || null;
     mpTransaction.receiver_id = apiData.collector_id?.toString() || apiData.receiver_id?.toString() || null;
     mpTransaction.cbu = cbuFromMp;
-    mpTransaction.office = officeFromAccount; // Guardar la office de la cuenta asociada
+    mpTransaction.office = officeFromCbu; // Guardar la office obtenida del CBU
 
     const savedMpTransaction = await this.saveTransaction(mpTransaction);
     console.log(`[IPN] DEPURACIÓN: Transacción MP guardada con los siguientes datos:`, {
@@ -437,7 +453,7 @@ export class IpnService implements OnModuleInit {
       status: savedMpTransaction.status,
       email: savedMpTransaction.payer_email,
       cbu: savedMpTransaction.cbu,
-      office: savedMpTransaction.office, // Log de la office guardada
+      office: savedMpTransaction.office,
       description: savedMpTransaction.description
     });
 
@@ -584,7 +600,13 @@ export class IpnService implements OnModuleInit {
     console.log(`[${opId}] Buscando transacción MP coincidente para depósito ${savedUserTransaction.id}...`);
 
     const matchingMpTransaction = this.transactions.find(mpTx => {
-      return (
+      // Verificar que no sea la misma transacción que estamos procesando
+      if (mpTx.id === savedUserTransaction.id) {
+        console.log(`[${opId}] Ignorando transacción con mismo ID: ${mpTx.id}`);
+        return false;
+      }
+
+      const isMatch = (
         mpTx.type === 'deposit' &&
         mpTx.status === 'Pending' &&
         !mpTx.relatedUserTransactionId &&
@@ -598,6 +620,30 @@ export class IpnService implements OnModuleInit {
         this.isDateCloseEnough(mpTx.date_created, savedUserTransaction.date_created) &&
         mpTx.office === savedUserTransaction.office
       );
+
+      if (isMatch) {
+        console.log(`[${opId}] Transacción MP ${mpTx.id} cumple con todos los criterios de match:`, {
+          id: mpTx.id,
+          type: mpTx.type,
+          status: mpTx.status,
+          amount: mpTx.amount,
+          email: mpTx.payer_email,
+          office: mpTx.office,
+          date_created: mpTx.date_created
+        });
+      } else {
+        console.log(`[${opId}] Transacción MP ${mpTx.id} no cumple con los criterios de match:`, {
+          type: mpTx.type,
+          status: mpTx.status,
+          hasRelatedUser: !!mpTx.relatedUserTransactionId,
+          amount: mpTx.amount,
+          email: mpTx.payer_email,
+          office: mpTx.office,
+          date_created: mpTx.date_created
+        });
+      }
+
+      return isMatch;
     });
 
     if (matchingMpTransaction) {
