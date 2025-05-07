@@ -808,9 +808,8 @@ export class IpnService implements OnModuleInit {
 
     if (receiverId === undefined || receiverId === null) {
       console.warn("findAccountByReceiverId fue llamada con un receiver_id null o undefined.");
-      return undefined; // No se puede buscar cuenta si no hay ID receptor válido
+      return undefined;
     }
-
 
     console.log(`Buscando cuenta para receiver_id: ${receiverId}`);
     console.log("Todas las cuentas disponibles:", this.accounts.map(acc => ({
@@ -819,42 +818,22 @@ export class IpnService implements OnModuleInit {
       agent: acc.agent,
       office: acc.office,
       mp_client_id: acc.mp_client_id,
-      receiverId: acc.receiver_id,
+      receiver_id: acc.receiver_id,
     })));
 
     const receiverIdStr = receiverId.toString();
 
-    this.accounts.forEach(acc => {
-      if (acc.receiver_id) {
-        console.log(`Verificando cuenta: ${acc.name}, receiver_id: ${acc.receiver_id} (${typeof acc.receiver_id}), 
-                    coincide con ${receiverIdStr} (${typeof receiverIdStr}): ${acc.receiver_id.toString() === receiverIdStr}`);
-      }
-    });
-
-    // Buscar primero directamente por receiver_id en la cuenta
-    const accountByDirectMatch = this.accounts.find(account =>
-      account.wallet === 'mercadopago' &&
-      account.status === 'active' &&
-      account.receiver_id && // Verificar que receiver_id existe
-      account.receiver_id.toString() === receiverIdStr
+    // Buscar la cuenta que coincida con el receiver_id
+    const account = this.accounts.find(acc =>
+      acc.wallet === 'mercadopago' &&
+      acc.status === 'active' &&
+      acc.receiver_id &&
+      acc.receiver_id.toString() === receiverIdStr
     );
 
-    if (accountByDirectMatch) {
-      console.log(`Cuenta encontrada por mp_client_id: ${accountByDirectMatch.name} (ID: ${accountByDirectMatch.id})`);
-      return accountByDirectMatch;
-    }
-
-    // Si no se encuentra por mp_client_id, intentar con el mapeo de CBU
-    const accountByMappedCbu = this.accounts.find(account =>
-      account.wallet === 'mercadopago' &&
-      account.status === 'active' &&
-      account.receiver_id &&
-      account.receiver_id.toString() === receiverIdStr
-    );
-
-    if (accountByMappedCbu) {
-      console.log(`Cuenta encontrada por mapeo CBU: ${accountByMappedCbu.name} (ID: ${accountByMappedCbu.id})`);
-      return accountByMappedCbu;
+    if (account) {
+      console.log(`Cuenta encontrada: ${account.name} (ID: ${account.id}) con office: ${account.office}`);
+      return account;
     }
 
     console.log(`No se encontró cuenta para receiver_id: ${receiverId}`);
