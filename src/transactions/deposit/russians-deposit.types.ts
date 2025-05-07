@@ -9,4 +9,5 @@ export interface RussiansDepositData {
   idTransaction?: string;
   idAgent?: string;
   payer_email?: string; // Añadido para soportar el email en los depósitos externos
+  nombreDelTitular?: string; // Añadido para soportar el nombre del titular en los depósitos externos
 }

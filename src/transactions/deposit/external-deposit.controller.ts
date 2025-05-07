@@ -1,12 +1,12 @@
 import { Controller, Post, Body, HttpException, HttpStatus } from '@nestjs/common';
-import { Transaction } from '../transaction.types';
-import { IpnService } from '../transactions.service';
-import { RussiansDepositData } from './russians-deposit.types';
+import { Transaction } from '../transaction.types'; // Asegúrate de que Transaction esté correctamente exportado
+import { IpnService } from '../transactions.service'; // Asegúrate de que IpnService esté correctamente exportado
+import { RussiansDepositData } from './russians-deposit.types'; // Asegúrate de que RussiansDepositData esté correctamente definido y exportado
 import { ApiTags, ApiOperation, ApiBody, ApiResponse } from '@nestjs/swagger';
 
 // Estructura simplificada para la respuesta del endpoint
 interface SimpleResponse {
-    status: string;
+    status: string; // 'success' or 'error'
     message: string;
 }
 
@@ -16,281 +16,95 @@ class ExternalDepositDto {
     emailOrDni: string;
     idClient: string;
     cbu: string;
-    idTransaction: string;
-    idAgent?: string;
+    idTransaction: string; // Este debería ser el ID único del depósito reportado por el usuario
+    idAgent?: string; // Este será el campo 'office' en la transacción
     nombreDelTitular?: string;
+    dateCreated?: string; // Agregar si el sistema externo proporciona la fecha
 }
 
 @ApiTags('Deposits')
-@Controller()
+@Controller('deposits') // Un prefijo para el controlador puede ser útil
 export class ExternalDepositController {
     constructor(private readonly ipnService: IpnService) { }
 
-    @Post('deposit')
-    @ApiOperation({ summary: 'Registrar un nuevo depósito desde sistema externo' })
+    @Post('external') // Endpoint específico para depósitos externos
+    @ApiOperation({ summary: 'Registrar un nuevo depósito desde sistema externo y validar' })
     @ApiBody({ type: ExternalDepositDto })
-    @ApiResponse({ status: 200, description: 'Depósito registrado exitosamente' })
-    @ApiResponse({ status: 400, description: 'Datos inválidos' })
+    @ApiResponse({ status: 200, description: 'Depósito procesado exitosamente (puede estar Pendiente o Aceptado)' })
+    @ApiResponse({ status: 400, description: 'Datos inválidos o CBU incorrecto para la oficina' })
+    @ApiResponse({ status: 500, description: 'Error interno del servidor' })
     async handleExternalDeposit(@Body() body: ExternalDepositDto): Promise<SimpleResponse> {
         const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
         console.log(`[${requestId}] INICIO: Solicitud de depósito externo recibida:`, JSON.stringify(body));
+
         try {
-            console.log('Recibida solicitud de depósito externo:', body);
-
-
-            // Updated validation to use emailOrDni instead of email
-            if (!body.amount || !body.emailOrDni || !body.idClient) {
-                return {
-                    status: 'error',
-                    message: 'Fields amount, emailOrDni, and idClient are required'
-                };
+            // 1. Validación básica de campos requeridos en el Controller
+            if (!body.amount || !body.emailOrDni || !body.idClient || !body.cbu || !body.idTransaction || !body.idAgent) {
+                console.warn(`[${requestId}] Validación básica fallida: Faltan campos requeridos.`);
+                throw new HttpException('Campos amount, emailOrDni, idClient, cbu, idTransaction, y idAgent son requeridos', HttpStatus.BAD_REQUEST);
             }
 
-            const cbuToUse = body.cbu || 'DEFAULT_CBU';
-
-            // Validación de CBU
-            if (!this.isValidCbu(cbuToUse)) {
-                return {
-                    status: 'error',
-                    message: 'incorrect CBU'
-                };
-            }
-
-            // Obtener todas las transacciones
-            const allTransactions = await this.ipnService.getTransactions();
-
-            // PASO 1: Verificar si ya se procesó este idTransaction específico
-            if (body.idTransaction) {
-                const existingTransaction = allTransactions.find(tx =>
-                    tx.external_reference === body.idTransaction ||
-                    tx.id.toString() === body.idTransaction
-                );
-
-                if (existingTransaction) {
-                    console.log(`El idTransaction ${body.idTransaction} ya fue utilizado anteriormente`);
-
-                    // Guardar la transacción rechazada para historial
-                    const rejectedTransaction: Transaction = {
-                        id: body.idTransaction || `deposit_${Date.now()}`,
-                        type: 'deposit',
-                        amount: body.amount,
-                        status: 'Rechazado',
-                        date_created: new Date().toISOString(),
-                        description: 'Transacción rechazada: ID de transacción duplicado',
-                        cbu: cbuToUse,
-                        idCliente: body.idClient,
-                        payer_email: body.emailOrDni  // Updated to use emailOrDni
-                    };
-
-                    await this.ipnService.saveTransaction(rejectedTransaction);
-
-                    return {
-                        status: 'error',
-                        message: 'Este ID de transacción ya fue procesado anteriormente'
-                    };
-                }
-            }
-
-            // PASO 2: Verificar si la combinación monto/email/ID ha sido validada antes
-            // PASO 2: Verificar si ya existe un depósito externo o transferencia MP con los mismos datos
-            const matchingTransaction = allTransactions.find(tx =>
-                tx.type === 'deposit' &&
-                Math.abs(tx.amount - body.amount) < 0.01 &&
-                tx.payer_email?.toLowerCase() === body.emailOrDni.toLowerCase() &&
-                tx.cbu === cbuToUse &&
-                (tx.status === 'Aceptado' || tx.status === 'approved') &&
-                // Si hay ID de transacción, verificar que coincida también
-                (!body.idTransaction || tx.external_reference === body.idTransaction || tx.id.toString() === body.idTransaction)
-            );
-
-            if (matchingTransaction) {
-                console.log(`¡Encontrada transacción coincidente!`, matchingTransaction);
-
-                // Verificar si esta transacción ya fue usada para validar otra
-                const alreadyUsedForValidation = allTransactions.some(tx =>
-                    tx.reference_transaction === matchingTransaction.id.toString()
-                );
-
-                if (alreadyUsedForValidation) {
-                    console.log(`La transacción ${matchingTransaction.id} ya fue usada para validar otra transacción`);
-
-                    // Crear una transacción pendiente que requerirá verificación manual
-                    const idTransferencia = body.idTransaction || `deposit_${Date.now()}`;
-                    const pendingTransaction: Transaction = {
-                        id: idTransferencia,
-                        type: 'deposit',
-                        amount: body.amount,
-                        status: 'Pending',
-                        date_created: new Date().toISOString(),
-                        description: 'Depósito pendiente: Se requiere verificación manual (transacción original ya utilizada)',
-                        cbu: cbuToUse,
-                        idCliente: body.idClient,
-                        payer_email: body.emailOrDni,
-                        external_reference: body.idTransaction,
-                        office: body.idAgent // Guardar el ID de la oficina (será convertido a nombre por el servicio)
-                    };
-
-                    await this.ipnService.saveTransaction(pendingTransaction);
-
-                    return {
-                        status: 'success',
-                        message: ''
-                    };
-                }
-
-                // Crear transacción aceptada
-                const idTransferencia = body.idTransaction || `deposit_${Date.now()}`;
-                const autoApprovedTransaction: Transaction = {
-                    id: idTransferencia,
-                    type: 'deposit',
-                    amount: body.amount,
-                    status: 'Aceptado',
-                    date_created: new Date().toISOString(),
-                    description: 'Depósito validado automáticamente',
-                    cbu: cbuToUse,
-                    idCliente: body.idClient,
-                    payer_email: body.emailOrDni,
-                    external_reference: body.idTransaction,
-                    reference_transaction: matchingTransaction.id.toString(), // Referencia a la transacción original
-                    office: body.idAgent // Guardar el ID de la oficina (será convertido a nombre por el servicio)
-                };
-
-                await this.ipnService.saveTransaction(autoApprovedTransaction);
-
-                return {
-                    status: 'success',
-                    message: ''
-                };
-            }
-
-
-            // PASO 3: Buscar transacción original que coincida (para validación automática)
-            // Solo buscar transacciones reales (no las validadas automáticamente)
-            const secondaryMatchingTransaction = allTransactions.find(tx =>
-                tx.type === 'deposit' &&
-                Math.abs(tx.amount - body.amount) < 0.01 &&
-                tx.payer_email?.toLowerCase() === body.emailOrDni.toLowerCase() &&
-                (tx.status === 'Aceptado' || tx.status === 'approved') &&
-                !tx.description?.includes('validado automáticamente')
-            );
-
-            if (secondaryMatchingTransaction) {
-                console.log('¡Encontrada transacción coincidente real!', secondaryMatchingTransaction);
-
-                // Verificar si esta transacción original ya fue usada para validar otra
-                const alreadyUsedForValidation = allTransactions.some(tx =>
-                    tx.description?.includes('validado automáticamente') &&
-                    tx.reference_transaction === secondaryMatchingTransaction.id.toString()
-                );
-
-                if (alreadyUsedForValidation) {
-                    console.log(`La transacción original ${secondaryMatchingTransaction.id} ya fue usada para validar otra transacción`);
-
-                    // Guardar transacción rechazada para historial
-                    const rejectedTransaction: Transaction = {
-                        id: body.idTransaction || `deposit_${Date.now()}`,
-                        type: 'deposit',
-                        amount: body.amount,
-                        status: 'Rechazado',
-                        date_created: new Date().toISOString(),
-                        description: 'Transacción rechazada: Pago original ya validado',
-                        cbu: cbuToUse,
-                        idCliente: body.idClient,
-                        payer_email: body.emailOrDni // Updated to use emailOrDni
-                    };
-
-                    await this.ipnService.saveTransaction(rejectedTransaction);
-
-                    return {
-                        status: 'error',
-                        message: 'La transacción original ya fue utilizada para validar otro depósito'
-                    };
-                }
-
-                // Crear transacción aceptada
-                const idTransferencia = body.idTransaction || `deposit_${Date.now()}`;
-                const autoApprovedTransaction: Transaction = {
-                    id: idTransferencia,
-                    type: 'deposit',
-                    amount: body.amount,
-                    status: 'Aceptado',
-                    date_created: new Date().toISOString(),
-                    description: 'Depósito validado automáticamente',
-                    cbu: cbuToUse,
-                    idCliente: body.idClient,
-                    payer_email: body.emailOrDni, // Updated to use emailOrDni
-                    external_reference: body.idTransaction,
-                    reference_transaction: secondaryMatchingTransaction.id.toString() // Referencia a la transacción original
-                };
-
-                await this.ipnService.saveTransaction(autoApprovedTransaction);
-
-                return {
-                    status: 'success',
-                    message: ''
-                };
-            }
-
-            // Si llegamos aquí, seguimos con el flujo normal
+            // 2. Preparar los datos en el formato esperado por el servicio
+            // Usamos body.idTransaction como idTransferencia y externalReference
             const depositData: RussiansDepositData = {
-                cbu: cbuToUse,
+                cbu: body.cbu,
                 amount: body.amount,
-                idTransferencia: body.idTransaction || `deposit_${Date.now()}`,
-                dateCreated: new Date().toISOString(),
+                idTransaction: body.idTransaction, // Usamos este como ID reportado
+                dateCreated: body.dateCreated || new Date().toISOString(), // Usar fecha si viene, sino current
                 idCliente: body.idClient,
-                email: body.emailOrDni, // Updated to use emailOrDni
-                externalReference: body.idTransaction
+                email: body.emailOrDni, // Mapeamos emailOrDni a email para el servicio
+                externalReference: body.idTransaction, // Puede ser útil guardar el idTransaction original aquí también
+                idAgent: body.idAgent, // Este es el 'office'
+                nombreDelTitular: body.nombreDelTitular, // Campos opcionales
+                idTransferencia: body.idTransaction, // Este es el ID único del depósito reportado por el usuario
             };
 
-            // Add optional fields if present
-            if (body.idAgent) {
-                depositData['idAgent'] = body.idAgent;
-            }
+            console.log(`[${requestId}] Llamando a ipnService.validateWithMercadoPago con datos:`, depositData);
 
-            if (body.nombreDelTitular) {
-                depositData['nombreDelTitular'] = body.nombreDelTitular;
-            }
-            console.log(`[${requestId}] Validando depósito:`, depositData);
+            // 3. Delegar la validación completa al servicio
             const result = await this.ipnService.validateWithMercadoPago(depositData);
-            console.log(`[${requestId}] Resultado de validateWithMercadoPago:`, JSON.stringify(result));
-            if (!result.transaction.payer_email) {
-                await this.ipnService.updateTransactionEmail(
-                    result.transaction.id.toString(),
-                    body.emailOrDni // Updated to use emailOrDni
-                );
-            }
-            console.log(`[${requestId}] FIN: Solicitud de depósito procesada. Resultado:`,
-                JSON.stringify({ status: result.status, message: result.message?.substring(0, 100) }));
-            console.log('Resultado de validateWithMercadoPago:', result);
-            // Devolver respuesta simplificada
-            if (result.status === 'error' && result.message && result.message.includes('Mercado Pago')) {
-                console.error('Error al validar el depósito con Mercado Pago:', result.message);
+
+            console.log(`[${requestId}] Resultado de ipnService.validateWithMercadoPago:`, JSON.stringify(result));
+
+            // 4. Interpretar el resultado del servicio y devolver la respuesta simplificada
+            if (result.status === 'error') {
+                // Si el servicio devuelve un error (ej: CBU inválido para la oficina), responder 400
+                if (result.message?.includes('CBU proporcionado no es válido') || result.message?.includes('ID de transacción duplicado con estado de error')) {
+                    console.warn(`[${requestId}] Error de validación reportado por servicio: ${result.message}`);
+                    throw new HttpException(result.message, HttpStatus.BAD_REQUEST);
+                }
+                // Otros errores del servicio pueden ser 500 internos si no son errores de validación de entrada
+                console.error(`[${requestId}] Error inesperado reportado por servicio: ${result.message}`);
+                throw new HttpException(result.message || 'Error interno al procesar depósito', HttpStatus.INTERNAL_SERVER_ERROR);
+
+            } else { // result.status === 'success'
+                // El servicio devolvió éxito. El depósito está PENDING o ACEPTADO.
+                // La respuesta simplificada solo necesita status 'success' y un mensaje si es necesario.
+                console.log(`[${requestId}] Depósito procesado exitosamente por el servicio. Estado final: ${result.transaction.status}`);
                 return {
                     status: 'success',
-                    message: ''
-                };
-            } else {
-                // Mantenemos el comportamiento original para otros casos
-                return {
-                    status: result.status === 'success' ? 'success' : 'error',
-                    message: result.status === 'success' ? '' : result.message
+                    // Puedes incluir un mensaje más detallado si quieres, basado en result.message
+                    message: result.message // El servicio ya devuelve un mensaje descriptivo
                 };
             }
+
         } catch (error) {
-            console.error('Error al procesar depósito externo:', error);
-            return {
-                status: 'error',
-                message: error.message || 'Error al procesar el depósito'
-            };
+            console.error(`[${requestId}] Error al procesar depósito externo:`, error);
+            if (error instanceof HttpException) {
+                throw error; // Relanzar excepciones HTTP controladas
+            }
+            // Para cualquier otro error no manejado específicamente
+            throw new HttpException(error.message || 'Error interno del servidor', HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
-    // Método auxiliar para validar CBU
+    // NOTA: La validación de CBU más compleja (contra cuentas configuradas y oficina)
+    // ya está implementada DENTRO del IpnService (isValidCbu allí).
+    // Si esta función aquí no hace nada más allá de un chequeo de formato básico,
+    // podría incluso eliminarse y dejar que el servicio la maneje.
+    // Si la dejas, asegúrate de que no esté consultando la base de datos o el estado global del servicio.
     private isValidCbu(cbu: string): boolean {
-        // Implementar la validación de CBU específica para tu negocio
-        // Por ejemplo, verificar si el CBU existe en las cuentas configuradas
-
-        // Ejemplo simple de validación (implementar lógica real)
-        return cbu && cbu.length > 0 && cbu !== 'INVALID_CBU';
+        // Implementación básica (ejemplo: solo verificar que no esté vacío)
+        return cbu && cbu.length > 0;
     }
 }
