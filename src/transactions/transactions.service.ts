@@ -467,11 +467,11 @@ export class IpnService implements OnModuleInit {
       if (matchingExternalDeposit) {
         console.log(`[IPN] ${savedMpTransaction.id}: ¡Coincidencia encontrada con depósito externo ID: ${matchingExternalDeposit.id}`);
 
-        // 1. Actualizar la transacción MP a "Aceptado"
-        await this.updateTransactionStatus(savedMpTransaction.id.toString(), 'Aceptado');
+        // 1. Actualizar la transacción MP a "Match"
+        await this.updateTransactionStatus(savedMpTransaction.id.toString(), 'Match');
 
-        // 2. Cambiar el depósito externo a "Match"
-        await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Match');
+        // 2. Cambiar el depósito externo a "Aceptado"
+        await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Aceptado');
 
         // 3. Añadir referencias cruzadas entre ambas transacciones
         await this.updateTransactionInfo(matchingExternalDeposit.id.toString(), {
@@ -680,11 +680,11 @@ export class IpnService implements OnModuleInit {
     if (matchingTransaction) {
       console.log(`[${opId}] ¡Coincidencia encontrada con transacción MP ID: ${matchingTransaction.id}`);
 
-      // 1. Actualizar la transacción MP a "Aceptado"
-      await this.updateTransactionStatus(matchingTransaction.id.toString(), 'Aceptado');
+      // 1. Actualizar la transacción MP a "Match" en lugar de "Aceptado"
+      await this.updateTransactionStatus(matchingTransaction.id.toString(), 'Match');
 
-      // 2. Cambiar el depósito externo a "Match"
-      await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Match');
+      // 2. Cambiar el depósito externo a "Aceptado"
+      await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Aceptado');
 
       // 3. Añadir referencias cruzadas entre ambas transacciones
       await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
