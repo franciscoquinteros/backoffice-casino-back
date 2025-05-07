@@ -53,18 +53,27 @@ export class IpnService implements OnModuleInit {
 
   async updateTransactionInfo(id: string, info: any): Promise<Transaction | null> {
     try {
+      // LOG: Información que se va a actualizar en la BD
+      console.log(`Actualizando info de transacción ${id} con:`, info);
+
       await this.transactionRepository.update(id, info);
 
       // Actualizar en memoria
       this.transactions = this.transactions.map(t => {
         if (t.id.toString() === id) {
-          return { ...t, ...info };
+          const updatedTransaction = { ...t, ...info };
+          // LOG: Transacción actualizada en memoria
+          console.log(`Transacción ${id} actualizada en memoria:`, updatedTransaction);
+          return updatedTransaction;
         }
         return t;
       });
 
       const updatedEntity = await this.transactionRepository.findOne({ where: { id } });
-      return updatedEntity ? this.mapEntityToTransaction(updatedEntity) : null;
+      const updatedTransaction = updatedEntity ? this.mapEntityToTransaction(updatedEntity) : null;
+      // LOG: Transacción recuperada después de la actualización en BD
+      console.log(`Transacción ${id} recuperada de BD tras update:`, updatedTransaction);
+      return updatedTransaction;
     } catch (error) {
       console.error(`Error al actualizar información adicional de transacción ${id}:`, error);
       return null;
@@ -494,13 +503,13 @@ export class IpnService implements OnModuleInit {
         await this.updateTransactionInfo(matchingUserDeposit.id.toString(), {
           reference_transaction: savedMpTransaction.id.toString(),
           description: `Depósito consolidado en transacción MP ID: ${savedMpTransaction.id}`,
-          office: matchingUserDeposit.office || savedMpTransaction.office
+          office: matchingUserDeposit.office
         });
-
+        console.log(`[IPN] ${savedMpTransaction.id}: PREPARANDO COPIA - Copiando Office '${matchingUserDeposit.office}' (User Tx ${matchingUserDeposit.id}) a MP Tx ${savedMpTransaction.id} (Office era '${savedMpTransaction.office}').`);
         await this.updateTransactionInfo(savedMpTransaction.id.toString(), {
           relatedUserTransactionId: matchingUserDeposit.id.toString(),
           description: `Transacción validada con depósito externo ID: ${matchingUserDeposit.id}`,
-          office: savedMpTransaction.office || matchingUserDeposit.office
+          office: savedMpTransaction.office
         });
 
         console.log(`[IPN] ${savedMpTransaction.id}: Depósito externo ${matchingUserDeposit.id} marcado como Consolidado.`);
@@ -819,11 +828,13 @@ export class IpnService implements OnModuleInit {
       //    Si el match fue de la API, la IPN posterior (procesada por handleNotification)
       //    se encargará de marcar la transacción de MP como usada.
       if (!matchedFromApi && 'id' in matchedMpPayment) { // Si el match fue local (ya tenemos el objeto Transaction completo)
+        console.log(`[${opId}] PREPARANDO COPIA (Match Local) - Copiando Office '${savedUserTransaction.office}' (User Tx ${savedUserTransaction.id}) a MP Tx ${matchedMpPayment.id} (Office era '${matchedMpPayment.office}').`);
         await this.updateTransactionInfo(matchedMpPayment.id.toString(), {
           relatedUserTransactionId: savedUserTransaction.id.toString(), // En la transacción de MP, guardamos el ID del depósito de usuario
           description: (matchedMpPayment.description || '') + ` (Valida depósito usuario ID: ${savedUserTransaction.id})`, // Añadir una nota
-          office: matchedMpPayment.office || savedUserTransaction.office || depositData.idAgent
+          office: matchedMpPayment.office
         });
+        console.log(`[${opId}] COPIA REALIZADA (Match Local) - Office de MP Tx ${matchedMpPayment.id} ahora es '${savedUserTransaction.office}'.`);
         console.log(`[${opId}] Pago MP local ID ${matchedMpPayment.id} marcado como usado.`);
       }
       // Si el match fue de la API, la lógica en handleNotification (Paso 4) es crucial
