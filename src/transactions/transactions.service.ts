@@ -398,10 +398,22 @@ export class IpnService implements OnModuleInit {
     // --- PROCESAR RESPUESTA EXITOSA DE LA API DE MP ---
     const apiData = successfulResponse.data;
     console.log(`[IPN] ${paymentId}: Respuesta de la API de Mercado Pago (parcial):`, {
-      id: apiData.id, status: apiData.status, amount: apiData.transaction_amount,
-      payer_email: apiData.payer?.email, receiver_id: apiData.collector_id || apiData.receiver_id,
-      date_created: apiData.date_created
+      id: apiData.id,
+      status: apiData.status,
+      amount: apiData.transaction_amount,
+      payer_email: apiData.payer?.email,
+      receiver_id: apiData.collector_id || apiData.receiver_id,
+      date_created: apiData.date_created,
+      payment_method_id: apiData.payment_method_id,
+      transaction_details: apiData.transaction_details
     });
+
+    // Obtener el CBU del depósito desde transaction_details
+    let depositCbu = null;
+    if (apiData.transaction_details?.financial_institution) {
+      depositCbu = apiData.transaction_details.financial_institution;
+      console.log(`[IPN] ${paymentId}: CBU del depósito encontrado: ${depositCbu}`);
+    }
 
     // Buscar la cuenta asociada basada en el receiver_id de MP
     const associatedAccount = this.findAccountByReceiverId(apiData.collector?.id || apiData.receiver_id);
@@ -427,7 +439,8 @@ export class IpnService implements OnModuleInit {
     console.log(`[IPN] ${paymentId}: Cuenta asociada encontrada:`, {
       cbu: cbuFromMp,
       office: officeFromCbu,
-      accountName: associatedAccount?.name
+      accountName: associatedAccount?.name,
+      depositCbu: depositCbu
     });
 
     const existingMpTx = await this.getTransactionById(apiData.id.toString());
@@ -443,8 +456,8 @@ export class IpnService implements OnModuleInit {
     mpTransaction.payer_identification = apiData.payer?.identification || null;
     mpTransaction.external_reference = apiData.external_reference || null;
     mpTransaction.receiver_id = apiData.collector_id?.toString() || apiData.receiver_id?.toString() || null;
-    mpTransaction.cbu = cbuFromMp;
-    mpTransaction.office = officeFromCbu; // Guardar la office obtenida del CBU
+    mpTransaction.cbu = depositCbu || cbuFromMp; // Usar el CBU del depósito si está disponible, sino el de la cuenta
+    mpTransaction.office = officeFromCbu;
 
     const savedMpTransaction = await this.saveTransaction(mpTransaction);
     console.log(`[IPN] DEPURACIÓN: Transacción MP guardada con los siguientes datos:`, {
@@ -596,11 +609,16 @@ export class IpnService implements OnModuleInit {
       };
     }
 
-    // Buscar transacción MP coincidente
-    console.log(`[${opId}] Buscando transacción MP coincidente para depósito ${savedUserTransaction.id}...`);
+    // Buscar transacciones pendientes de Mercado Pago que coincidan con los criterios
+    const pendingMpTransactions = await this.getTransactions(
+      userDepositTransaction.office, // Filtrar por oficina
+      'deposit',                   // Filtrar por tipo
+      'Pending'                    // Filtrar por estado
+    );
 
-    const matchingMpTransaction = this.transactions.find(mpTx => {
-      // Verificar que no sea la misma transacción que estamos procesando
+    // Filtrar las transacciones que coinciden con los criterios
+    const matchingTransaction = pendingMpTransactions.find(mpTx => {
+      // Ignorar la misma transacción si ya existe
       if (mpTx.id === savedUserTransaction.id) {
         console.log(`[${opId}] Ignorando transacción con mismo ID: ${mpTx.id}`);
         return false;
@@ -646,30 +664,30 @@ export class IpnService implements OnModuleInit {
       return isMatch;
     });
 
-    if (matchingMpTransaction) {
-      console.log(`[${opId}] ¡Coincidencia encontrada con transacción MP ID: ${matchingMpTransaction.id}`);
+    if (matchingTransaction) {
+      console.log(`[${opId}] ¡Coincidencia encontrada con transacción MP ID: ${matchingTransaction.id}`);
 
       // 1. Actualizar la transacción MP a "Aceptado"
-      await this.updateTransactionStatus(matchingMpTransaction.id.toString(), 'Aceptado');
+      await this.updateTransactionStatus(matchingTransaction.id.toString(), 'Aceptado');
 
       // 2. Cambiar el depósito externo a "Match"
       await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Match');
 
       // 3. Añadir referencias cruzadas entre ambas transacciones
       await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
-        referenceTransaction: matchingMpTransaction.id.toString(),
-        description: `Depósito match con transacción MP ID: ${matchingMpTransaction.id}`,
+        referenceTransaction: matchingTransaction.id.toString(),
+        description: `Depósito match con transacción MP ID: ${matchingTransaction.id}`,
         office: savedUserTransaction.office
       });
 
-      await this.updateTransactionInfo(matchingMpTransaction.id.toString(), {
+      await this.updateTransactionInfo(matchingTransaction.id.toString(), {
         relatedUserTransactionId: savedUserTransaction.id.toString(),
         description: `Transacción match con depósito externo ID: ${savedUserTransaction.id}`,
-        office: matchingMpTransaction.office
+        office: matchingTransaction.office
       });
 
       console.log(`[${opId}] Depósito externo ${savedUserTransaction.id} marcado como Match.`);
-      console.log(`[${opId}] Transacción MP ${matchingMpTransaction.id} marcada como Aceptado.`);
+      console.log(`[${opId}] Transacción MP ${matchingTransaction.id} marcada como Aceptado.`);
 
       const updatedUserTransaction = await this.getTransactionById(savedUserTransaction.id.toString());
       return {
@@ -734,35 +752,34 @@ export class IpnService implements OnModuleInit {
 
 
   // Modificar getTransactions para filtrar DIRECTAMENTE por 'office'
-  async getTransactions(officeId?: string): Promise<Transaction[]> { // <-- Aceptar officeId opcional
-    console.log(`IpnService: Buscando transacciones${officeId ? ` para oficina ${officeId}` : ''}`);
+  async getTransactions(officeId?: string, type?: string, status?: string): Promise<Transaction[]> {
+    console.log(`IpnService: Buscando transacciones${officeId ? ` para oficina ${officeId}` : ''}${type ? ` de tipo ${type}` : ''}${status ? ` con estado ${status}` : ''}`);
 
     // Construir las opciones de búsqueda
     const findOptions: FindManyOptions<TransactionEntity> = {
       order: { dateCreated: 'DESC' }, // Ordenar por fecha descendente
+      where: {} // Inicializar el objeto where
     };
 
-    // Si se proporciona officeId, añadir la condición WHERE directa en el campo 'office'
-    // TypeORM automáticamente gestiona { office: officeId } para buscar en la columna 'office'
+    // Añadir filtros si se proporcionan
     if (officeId) {
-      findOptions.where = { office: officeId }; // <-- Filtrar DIRECTAMENTE por el campo 'office'
+      findOptions.where['office'] = officeId;
     }
-    // Si officeId no se proporciona, findOptions.where será undefined, y find() traerá todo (si se permite a un superadmin por ejemplo)
-    // O podrías lanzar un error si officeId es obligatorio siempre:
-    // if (!officeId) { throw new Error("Filtering by officeId is required"); }
-    // findOptions.where = { office: officeId };
+    if (type) {
+      findOptions.where['type'] = type;
+    }
+    if (status) {
+      findOptions.where['status'] = status;
+    }
 
     // Ejecutar la consulta y obtener los resultados
-    // TypeORM find() ya devuelve TransactionEntity[]
     const entities = await this.transactionRepository.find(findOptions);
 
-    // Mapear las entidades obtenidas al tipo Transaction si es necesario (si mapEntityToTransaction hace transformaciones)
-    // Si solo mapea 1:1, puedes devolver entities directamente si el tipo Transaction es igual a TransactionEntity
-    // Asumiendo que mapEntityToTransaction mapea correctamente los campos
-    const transactions = entities.map(entity => this.mapEntityToTransaction(entity)); // Mantengo el mapeo
+    // Mapear las entidades obtenidas al tipo Transaction
+    const transactions = entities.map(entity => this.mapEntityToTransaction(entity));
 
-    console.log(`IpnService: Obtenidas ${transactions.length} transacciones` + (officeId ? ` para oficina ${officeId}` : ''));
-    return transactions; // Devuelve Transaction[]
+    console.log(`IpnService: Obtenidas ${transactions.length} transacciones${officeId ? ` para oficina ${officeId}` : ''}${type ? ` de tipo ${type}` : ''}${status ? ` con estado ${status}` : ''}`);
+    return transactions;
   }
 
 
