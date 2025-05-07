@@ -33,7 +33,7 @@ export class AccountController {
     // Decide qué autenticación necesita este endpoint:
     // @UseGuards(JwtAuthGuard) // Si requiere usuario logueado (aunque no uses su oficina)
     // @UseGuards(ApiKeyAuth) // Si requiere API Key
-    @ApiKeyAuth(API_PERMISSIONS.ACCOUNTS_READ_CBUS) // Manteniendo tu ApiKeyAuth original
+    //@ApiKeyAuth(API_PERMISSIONS.ACCOUNTS_READ_CBUS) // Manteniendo tu ApiKeyAuth original
     @ApiOperation({ summary: 'Get CBU for an active account in a specific office' })
     // Cambia el nombre del parámetro en la documentación y en la URL
     @ApiQuery({ name: 'idAgent', required: true, description: 'ID of the office', type: String })
