@@ -592,7 +592,7 @@ export class IpnService implements OnModuleInit {
       cbu: depositData.cbu,
       idCliente: depositData.idCliente,
       payer_email: depositData.email,
-      external_reference: depositData.idTransaction,
+      external_reference: depositData.nombreDelTitular,
       office: depositData.idAgent,
     };
 
