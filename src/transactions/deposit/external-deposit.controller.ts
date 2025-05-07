@@ -23,11 +23,11 @@ class ExternalDepositDto {
 }
 
 @ApiTags('Deposits')
-@Controller('deposits') // Un prefijo para el controlador puede ser útil
+@Controller() // Un prefijo para el controlador puede ser útil
 export class ExternalDepositController {
     constructor(private readonly ipnService: IpnService) { }
 
-    @Post('external') // Endpoint específico para depósitos externos
+    @Post('deposit') // Endpoint específico para depósitos externos
     @ApiOperation({ summary: 'Registrar un nuevo depósito desde sistema externo y validar' })
     @ApiBody({ type: ExternalDepositDto })
     @ApiResponse({ status: 200, description: 'Depósito procesado exitosamente (puede estar Pendiente o Aceptado)' })
