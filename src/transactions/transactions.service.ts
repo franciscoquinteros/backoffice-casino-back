@@ -486,6 +486,40 @@ export class IpnService implements OnModuleInit {
           office: savedMpTransaction.office
         });
 
+        // 4. Llamar al proxy con el payload requerido
+        try {
+          const proxyPayload = {
+            user_id: parseInt(matchingExternalDeposit.idCliente?.toString() || '0', 10),
+            amount: matchingExternalDeposit.amount,
+            transaction_id: matchingExternalDeposit.id.toString()
+          };
+
+          console.log(`[IPN] ${savedMpTransaction.id}: Enviando payload al proxy para aceptación automática:`, proxyPayload);
+          const proxyResponse = await axios.post('http://18.216.231.42:8080/deposit', proxyPayload);
+          console.log(`[IPN] ${savedMpTransaction.id}: Respuesta del proxy recibida:`, proxyResponse.data);
+
+          if (proxyResponse.data?.status === 0) {
+            console.log(`[IPN] ${savedMpTransaction.id}: SUCCESS: Proxy aceptó la transacción. Actualizando estado a Aceptado.`);
+            const updatedTransaction = await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Aceptado');
+            if (proxyResponse.data.result?.new_balance) {
+              await this.updateTransactionInfo(matchingExternalDeposit.id.toString(), {
+                externalBalance: proxyResponse.data.result.new_balance
+              });
+            }
+            console.log(`[IPN] ${savedMpTransaction.id}: FIN: Transacción ${matchingExternalDeposit.id} aceptada automáticamente.`);
+          } else {
+            const errorMsg = proxyResponse.data?.error_message || 'Error desconocido del proxy';
+            console.error(`[IPN] ${savedMpTransaction.id}: ERROR: Proxy rechazó la transacción ${matchingExternalDeposit.id}. Razón: ${errorMsg}`);
+            await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Error');
+            await this.updateTransactionDescription(matchingExternalDeposit.id.toString(), `Error del Proxy: ${errorMsg}`);
+          }
+        } catch (error) {
+          console.error(`[IPN] ${savedMpTransaction.id}: ERROR: Falló la comunicación con el proxy para la transacción ${matchingExternalDeposit.id}:`, error.message);
+          await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Error');
+          const commErrorMsg = error.response?.data?.message || error.message || 'Error de comunicación con el proxy';
+          await this.updateTransactionDescription(matchingExternalDeposit.id.toString(), `Error de Comunicación con Proxy: ${commErrorMsg}`);
+        }
+
         console.log(`[IPN] ${savedMpTransaction.id}: Depósito externo ${matchingExternalDeposit.id} marcado como Match.`);
         console.log(`[IPN] ${savedMpTransaction.id}: Transacción MP marcada como Aceptado.`);
       } else {
@@ -664,6 +698,47 @@ export class IpnService implements OnModuleInit {
         description: `Transacción match con depósito externo ID: ${savedUserTransaction.id}`,
         office: matchingTransaction.office
       });
+
+      // 4. Llamar a acceptDeposit con el payload requerido
+      try {
+        const proxyPayload = {
+          user_id: parseInt(savedUserTransaction.idCliente?.toString() || '0', 10),
+          amount: savedUserTransaction.amount,
+          transaction_id: savedUserTransaction.id.toString()
+        };
+
+        console.log(`[${opId}] Enviando payload al proxy para aceptación automática:`, proxyPayload);
+        const proxyResponse = await axios.post('http://18.216.231.42:8080/deposit', proxyPayload);
+        console.log(`[${opId}] Respuesta del proxy recibida:`, proxyResponse.data);
+
+        if (proxyResponse.data?.status === 0) {
+          console.log(`[${opId}] SUCCESS: Proxy aceptó la transacción. Actualizando estado a Aceptado.`);
+          const updatedTransaction = await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Aceptado');
+          if (proxyResponse.data.result?.new_balance) {
+            await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
+              externalBalance: proxyResponse.data.result.new_balance
+            });
+          }
+          console.log(`[${opId}] FIN: Transacción ${savedUserTransaction.id} aceptada automáticamente.`);
+          return {
+            status: 'success',
+            message: 'Depósito validado y procesado automáticamente.',
+            transaction: updatedTransaction!
+          };
+        } else {
+          const errorMsg = proxyResponse.data?.error_message || 'Error desconocido del proxy';
+          console.error(`[${opId}] ERROR: Proxy rechazó la transacción ${savedUserTransaction.id}. Razón: ${errorMsg}`);
+          await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Error');
+          await this.updateTransactionDescription(savedUserTransaction.id.toString(), `Error del Proxy: ${errorMsg}`);
+          throw new Error(`Error en el procesamiento del proxy: ${errorMsg}`);
+        }
+      } catch (error) {
+        console.error(`[${opId}] ERROR: Falló la comunicación con el proxy para la transacción ${savedUserTransaction.id}:`, error.message);
+        await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Error');
+        const commErrorMsg = error.response?.data?.message || error.message || 'Error de comunicación con el proxy';
+        await this.updateTransactionDescription(savedUserTransaction.id.toString(), `Error de Comunicación con Proxy: ${commErrorMsg}`);
+        throw new Error(`Error de comunicación con el proxy: ${commErrorMsg}`);
+      }
 
       console.log(`[${opId}] Depósito externo ${savedUserTransaction.id} marcado como Match.`);
       console.log(`[${opId}] Transacción MP ${matchingTransaction.id} marcada como Aceptado.`);
