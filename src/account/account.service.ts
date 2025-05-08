@@ -232,4 +232,23 @@ export class AccountService {
     return accounts.map(account => account.cbu).filter(cbu => cbu !== null && cbu !== undefined);
   }
 
+  async findByCbu(cbu: string, officeId?: string): Promise<Account | null> {
+    try {
+      const query = this.accountRepository.createQueryBuilder('account')
+        .where('account.cbu = :cbu', { cbu })
+        .andWhere('account.wallet = :wallet', { wallet: 'mercadopago' })
+        .andWhere('account.status = :status', { status: 'active' })
+        .andWhere('account.mp_client_id IS NOT NULL');
+
+      if (officeId) {
+        query.andWhere('account.agent = :officeId', { officeId });
+      }
+
+      return await query.getOne();
+    } catch (error) {
+      console.error(`Error al buscar cuenta por CBU ${cbu}:`, error);
+      return null;
+    }
+  }
+
 }

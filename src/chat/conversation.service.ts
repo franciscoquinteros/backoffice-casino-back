@@ -68,7 +68,6 @@ export class ConversationService {
     });
   } */
   async getConversationById(id: string, officeId?: string): Promise<Conversation | null> { // <-- Aceptar officeId opcional
-    console.log(`ConversationService: Buscando conversación ID ${id}${officeId ? ` en oficina ${officeId}` : ''}`);
 
     const queryBuilder = this.conversationRepository.createQueryBuilder('conversation');
 
@@ -81,7 +80,7 @@ export class ConversationService {
 
     // Añadir relaciones
     queryBuilder.leftJoinAndSelect('conversation.messages', 'messages');
-    
+
     const conversation = await queryBuilder.getOne();
 
     if (!conversation) {
@@ -94,12 +93,12 @@ export class ConversationService {
 
   async getActiveConversationsByUserId(userId: string, officeId?: string): Promise<Conversation[]> {
     const query: any = { userId, status: 'active' };
-    
+
     // Si se proporciona officeId, añadirlo al filtro
     if (officeId) {
       query.officeId = officeId;
     }
-    
+
     return this.conversationRepository.find({
       where: query,
       order: { updatedAt: 'DESC' },
@@ -107,7 +106,6 @@ export class ConversationService {
   }
 
   async getActiveConversations(officeId?: string, agentId?: string): Promise<Conversation[]> { // <-- Aceptar officeId y agentId opcional
-    console.log(`ConversationService: Buscando conversaciones activas${officeId ? ` para oficina ${officeId}` : ''}${agentId ? ` con agente ${agentId} o desasignadas` : ''}`);
 
     // Usar QueryBuilder para filtrar
     const queryBuilder = this.conversationRepository.createQueryBuilder('conversation'); // Alias principal
@@ -133,12 +131,10 @@ export class ConversationService {
     // Ejecutar la consulta
     const conversations = await queryBuilder.getMany();
 
-    console.log(`ConversationService: Obtenidas ${conversations.length} conversaciones activas` + (officeId ? ` para oficina ${officeId}` : '') + (agentId ? ` con agente ${agentId} o desasignadas` : ''));
     return conversations; // Devuelve array de ConversationEntity
   }
 
   async getClosedConversations(officeId?: string, agentId?: string): Promise<Conversation[]> { // <-- Aceptar officeId y agentId opcional
-    console.log(`ConversationService: Buscando conversaciones cerradas${officeId ? ` para oficina ${officeId}` : ''}${agentId ? ` con agente ${agentId} o desasignadas` : ''}`);
 
     // Usar QueryBuilder para filtrar
     const queryBuilder = this.conversationRepository.createQueryBuilder('conversation'); // Alias principal
@@ -164,19 +160,18 @@ export class ConversationService {
     // Ejecutar la consulta
     const conversations = await queryBuilder.getMany();
 
-    console.log(`ConversationService: Obtenidas ${conversations.length} conversaciones cerradas` + (officeId ? ` para oficina ${officeId}` : '') + (agentId ? ` con agente ${agentId} o desasignadas` : ''));
     return conversations; // Devuelve array de ConversationEntity
   }
 
 
   async getAllConversationsByUserId(userId: string, officeId?: string): Promise<Conversation[]> {
     const query: any = { userId };
-    
+
     // Si se proporciona officeId, añadirlo al filtro
     if (officeId) {
       query.officeId = officeId;
     }
-    
+
     return this.conversationRepository.find({
       where: query,
       order: { updatedAt: 'DESC' },

@@ -23,22 +23,60 @@ export class IpnService implements OnModuleInit {
   private transactions: Transaction[] = [];
 
   constructor(
-    @Inject(forwardRef(() => AccountService)) // Usar forwardRef para inyectar AccountService
+    @Inject(forwardRef(() => AccountService))
     private accountService: AccountService,
     @InjectRepository(TransactionEntity)
     private transactionRepository: Repository<TransactionEntity>
-  ) { }
+  ) {
+    // Inicializar el servicio inmediatamente
+    this.initializeService();
+  }
 
-  // Add new method to reload the service
+  private async initializeService() {
+    try {
+      console.log('Inicializando servicio IPN...');
+      await this.reloadService();
+
+      // Configurar un intervalo para recargar las cuentas cada 5 minutos
+      setInterval(async () => {
+        try {
+          await this.reloadService();
+        } catch (error) {
+          console.error('Error en recarga automática de cuentas:', error);
+        }
+      }, 5 * 60 * 1000); // 5 minutos
+    } catch (error) {
+      console.error('Error al inicializar el servicio IPN:', error);
+      // Reintentar la inicialización después de 30 segundos
+      setTimeout(() => this.initializeService(), 30000);
+    }
+  }
+
+  // Modificar el método reloadService para ser más robusto
   async reloadService() {
     try {
       console.log('Reiniciando servicio IPN...');
+
       // Limpiar las cuentas actuales
       this.accounts = [];
 
       // Recargar todas las cuentas activas
-      this.accounts = await this.accountService.findAll();
+      const accounts = await this.accountService.findAll();
+
+      // Filtrar solo las cuentas válidas de Mercado Pago
+      this.accounts = accounts.filter(acc =>
+        acc.wallet === 'mercadopago' &&
+        acc.status === 'active' &&
+        acc.mp_access_token &&
+        acc.mp_client_id
+      );
+
       console.log(`Servicio IPN reiniciado con ${this.accounts.length} cuentas configuradas`);
+
+      // Verificar que tenemos al menos una cuenta válida
+      if (this.accounts.length === 0) {
+        console.warn('ADVERTENCIA: No hay cuentas de Mercado Pago activas configuradas');
+      }
 
       return {
         status: 'success',
@@ -554,7 +592,7 @@ export class IpnService implements OnModuleInit {
     };
   }
 
-  // Modificar validateWithMercadoPago para GUARDAR idAgent como 'office'
+  // Mantener la lógica original de validateWithMercadoPago
   async validateWithMercadoPago(depositData: RussiansDepositData) {
     const opId = `validate_${Date.now()}`;
     console.log(`[${opId}] INICIO: Validando depósito:`, JSON.stringify(depositData));
@@ -563,6 +601,12 @@ export class IpnService implements OnModuleInit {
 
     // Extraemos el idTransferencia del payload
     const idTransferencia = depositData.idTransaction || `deposit_${Date.now()}`;
+
+    // Verificar que tenemos cuentas configuradas
+    if (this.accounts.length === 0) {
+      console.warn(`[${opId}] No hay cuentas de Mercado Pago configuradas. Intentando recargar...`);
+      await this.reloadService();
+    }
 
     // Validación de CBU con filtro de oficina
     if (!this.isValidCbu(depositData.cbu, depositData.idAgent)) {
@@ -601,9 +645,9 @@ export class IpnService implements OnModuleInit {
     }
 
     // Crear o actualizar la transacción del usuario
-    const existingPendingOrAcceptedUserReport = await this.getTransactionById(idTransferencia);
+    const existingPendingOrAcceptedUserReport = await this.getTransactionById(depositData.idTransaction || '');
     const userDepositTransaction: Transaction = existingPendingOrAcceptedUserReport ? existingPendingOrAcceptedUserReport : {
-      id: idTransferencia,
+      id: depositData.idTransaction || `deposit_${Date.now()}`,
       type: 'deposit',
       amount: depositData.amount,
       status: 'Pending',
@@ -881,42 +925,13 @@ export class IpnService implements OnModuleInit {
     }
   }
 
-  private mapCbuToMpIdentifier(cbu: string): string {
-    // Buscar en la lista de cuentas configuradas
-    // Asegurarse de que la cuenta esté activa, sea de mercadopago y tenga mp_client_id
-    const account = this.accounts.find(acc =>
-      acc.cbu === cbu &&
-      acc.wallet === 'mercadopago' &&
-      acc.status === 'active' && // Solo considerar cuentas activas
-      acc.mp_client_id // Asegurarse de que tenga el ID de cliente MP necesario para mapeo
-    );
-
-    if (account?.mp_client_id) {
-      // console.log(`mapCbuToMpIdentifier: CBU ${cbu} mapeado a mp_client_id ${account.mp_client_id}`);
-      return account.mp_client_id;
-    }
-
-    console.warn(`mapCbuToMpIdentifier: No se encontró un identificador mp_client_id configurado para el CBU: ${cbu}`);
-
-    // Mantener el mapeo estático como respaldo si es estrictamente necesario,
-    // but it's preferable that all valid CBUs are in the configured accounts.
-    const cbuMapping: { [key: string]: string } = {
-      // '00010101': 'TU_RECEIVER_ID', // Reemplaza con el receiver_id de tu cuenta MP if not in Accounts
-      // Add more mappings based on your accounts if they are not in Accounts
-    };
-    // return cbuMapping[cbu] || ''; // Si usas el mapeo estático de respaldo
-    return ''; // If you ONLY rely on configured accounts
-  }
-
-  private isValidCbu(cbu: string, officeId?: string): boolean { // <-- Accept optional officeId
-    // For a CBU to be valid for Mercado Pago in this context,
-    // it must be configured in one of our active Mercado Pago accounts, AND belong to the specified office (agent).
+  private async isValidCbu(cbu: string, officeId?: string): Promise<boolean> {
     if (!cbu) {
       console.warn('isValidCbu: CBU is null or empty.');
       return false;
     }
 
-    console.log(`isValidCbu: Buscando cuenta para CBU ${cbu}${officeId ? ` en oficina ${officeId}` : ''}`); // Log
+    console.log(`isValidCbu: Buscando cuenta para CBU ${cbu}${officeId ? ` en oficina ${officeId}` : ''}`);
 
     // Buscar la cuenta que coincida con CBU, wallet, status, mp_client_id Y officeId (en la propiedad 'agent')
     const account = this.accounts.find(acc =>
@@ -929,13 +944,11 @@ export class IpnService implements OnModuleInit {
     );
 
     if (!account) {
-      console.warn(`isValidCbu: No se encontró una cuenta activa de Mercado Pago configurada para el CBU: ${cbu}${officeId ? ` en oficina ${officeId}` : ''}`); // Log
-      // You can add a basic CBU format check here if you want,
-      // but the main validation is that it corresponds to a configured account in the office.
+      console.warn(`isValidCbu: No se encontró una cuenta activa de Mercado Pago configurada para el CBU: ${cbu}${officeId ? ` en oficina ${officeId}` : ''}`);
       return false;
     }
 
-    console.log(`isValidCbu: CBU ${cbu} validado contra cuenta configurada ${account.name} (ID: ${account.id}) en oficina ${account.agent}.`); // Log (usar acc.agent en log también)
+    console.log(`isValidCbu: CBU ${cbu} validado contra cuenta configurada ${account.name} (ID: ${account.id}) en oficina ${account.agent}.`);
     return true;
   }
 
@@ -1012,5 +1025,23 @@ export class IpnService implements OnModuleInit {
 
     console.log(`matchCbuWithMp: Resultado final isMatch = ${isMatch} (receiverIdMatch: ${receiverIdMatch}, cvuCheck: ${cvuCheck})`);
     return isMatch;
+  }
+
+  private mapCbuToMpIdentifier(cbu: string): string {
+    // Buscar en la lista de cuentas configuradas
+    // Asegurarse de que la cuenta esté activa, sea de mercadopago y tenga mp_client_id
+    const account = this.accounts.find(acc =>
+      acc.cbu === cbu &&
+      acc.wallet === 'mercadopago' &&
+      acc.status === 'active' && // Solo considerar cuentas activas
+      acc.mp_client_id // Asegurarse de que tenga el ID de cliente MP necesario para mapeo
+    );
+
+    if (account?.mp_client_id) {
+      return account.mp_client_id;
+    }
+
+    console.warn(`mapCbuToMpIdentifier: No se encontró un identificador mp_client_id configurado para el CBU: ${cbu}`);
+    return '';
   }
 }
