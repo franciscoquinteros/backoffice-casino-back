@@ -114,6 +114,10 @@ export class AccountService {
       try {
         await this.ipnService.configureAccount(savedAccount);
         console.log(`Cuenta de MercadoPago configurada para IPN: ${savedAccount.name} (ID: ${savedAccount.id})`);
+
+        // Reiniciar el servicio IPN para asegurar que la nueva cuenta esté disponible
+        await this.ipnService.reloadService();
+        console.log('Servicio IPN reiniciado después de crear nueva cuenta');
       } catch (error) {
         console.error('Error al configurar cuenta en IPN service:', error);
       }
@@ -143,21 +147,22 @@ export class AccountService {
     return updatedAccount;
   } */
 
-  async update(id: number, updateAccountDto: Partial<CreateAccountDto>, officeId: string): Promise<Account> { // <-- Aceptar officeId
+  async update(id: number, updateAccountDto: Partial<CreateAccountDto>, officeId: string): Promise<Account> {
     console.log(`AccountService: Actualizando cuenta ID ${id} en oficina ${officeId}`);
-    // Usamos el findOne modificado: si la cuenta con ese ID no está en la oficina, findOne lanzará NotFoundException
-    const account = await this.findOne(id, officeId); // <-- Usar findOne con filtro de oficina
+    const account = await this.findOne(id, officeId);
 
-    // Actualizar los campos proporcionados (incluirá office si está en updateAccountDto, pero findOne ya verificó la oficina original)
     Object.assign(account, updateAccountDto);
 
-    // Guardar la cuenta actualizada
     const updatedAccount = await this.accountRepository.save(account);
 
     if (updatedAccount.wallet === 'mercadopago' && updatedAccount.status === 'active') {
       try {
         await this.ipnService.configureAccount(updatedAccount);
         console.log(`Configuración de IPN actualizada para cuenta: ${updatedAccount.name} (ID: ${updatedAccount.id})`);
+
+        // Reiniciar el servicio IPN para asegurar que los cambios estén disponibles
+        await this.ipnService.reloadService();
+        console.log('Servicio IPN reiniciado después de actualizar cuenta');
       } catch (error) {
         console.error('Error al actualizar configuración en IPN service:', error);
       }

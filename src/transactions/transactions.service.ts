@@ -29,6 +29,26 @@ export class IpnService implements OnModuleInit {
     private transactionRepository: Repository<TransactionEntity>
   ) { }
 
+  // Add new method to reload the service
+  async reloadService() {
+    try {
+      console.log('Reiniciando servicio IPN...');
+      // Limpiar las cuentas actuales
+      this.accounts = [];
+
+      // Recargar todas las cuentas activas
+      this.accounts = await this.accountService.findAll();
+      console.log(`Servicio IPN reiniciado con ${this.accounts.length} cuentas configuradas`);
+
+      return {
+        status: 'success',
+        message: `Servicio IPN reiniciado con ${this.accounts.length} cuentas configuradas`
+      };
+    } catch (error) {
+      console.error('Error al reiniciar el servicio IPN:', error);
+      throw error;
+    }
+  }
 
   // En IpnService (transactions.service.ts)
   async updateTransactionDescription(id: string, description: string): Promise<Transaction | null> {
