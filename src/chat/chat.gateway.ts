@@ -656,7 +656,6 @@ export class ChatGateway {
   @SubscribeMessage('getActiveChats')
   async handleGetActiveChats(@ConnectedSocket() client: Socket, @MessageBody() data?: { officeId?: string, agentId?: string }) {
     try {
-      console.log(`Obteniendo chats activos${data?.officeId ? ` para oficina ${data.officeId}` : ''}${data?.agentId ? ` con agente ${data.agentId} o desasignados` : ''}`);
       
       // Obtener el agentId del socket o del payload
       const agentId = data?.agentId || this.socketToAgent.get(client.id);
@@ -683,7 +682,6 @@ export class ChatGateway {
   @SubscribeMessage('getArchivedChats')
   async handleGetArchivedChats(@ConnectedSocket() client: Socket, @MessageBody() data?: { officeId?: string, agentId?: string }) {
     try {
-      console.log(`Obteniendo chats archivados${data?.officeId ? ` para oficina ${data.officeId}` : ''}${data?.agentId ? ` con agente ${data.agentId} o desasignados` : ''}`);
       
       // Obtener el agentId del socket o del payload
       const agentId = data?.agentId || this.socketToAgent.get(client.id);
@@ -793,7 +791,6 @@ export class ChatGateway {
 
   @SubscribeMessage('getConnectedUsers')
   async handleGetConnectedUsers(@ConnectedSocket() client: Socket) {
-    console.log('Obteniendo usuarios conectados');
 
     // Crear un array con todos los IDs de usuarios conectados
     const connectedUsers = Array.from(this.activeChats.keys());

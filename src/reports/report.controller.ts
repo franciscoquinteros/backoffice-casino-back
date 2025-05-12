@@ -133,7 +133,7 @@ export class ReportController {
 
     console.log(`[ReportController - getDashboardSummary] Calling service for office ID: ${officeId}`);
     return this.reportService.getDashboardSummaryForOffice(officeId);
-}
+  }
 
   @Get('/conversation-status-distribution')
   @ApiOperation({ summary: 'Get distribution of conversations by status for logged-in user\'s office' })
@@ -142,6 +142,38 @@ export class ReportController {
     const userOfficeId = request.user?.office;
     if (!userOfficeId) { throw new ForbiddenException("User office information is missing."); }
     return this.reportService.getConversationStatusDistributionForOffice(parseInt(userOfficeId, 10));
+  }
+
+  @Get('transaction-summary')
+  @ApiOperation({ summary: 'Get transaction summary for user office' })
+  async getTransactionSummary(@Req() request: RequestWithUser) {
+    const officeId = request.user?.office;
+    if (!officeId) throw new ForbiddenException('User office missing');
+    return this.reportService.getTransactionSummary(officeId);
+  }
+
+  @Get('transactions-by-status')
+  @ApiOperation({ summary: 'Get transactions grouped by status for user office' })
+  async getTransactionsByStatus(@Req() request: RequestWithUser) {
+    const officeId = request.user?.office;
+    if (!officeId) throw new ForbiddenException('User office missing');
+    return this.reportService.getTransactionsByStatus(officeId);
+  }
+
+  @Get('transaction-trend')
+  @ApiOperation({ summary: 'Get transaction trend for user office' })
+  async getTransactionTrend(@Req() request: RequestWithUser) {
+    const officeId = request.user?.office;
+    if (!officeId) throw new ForbiddenException('User office missing');
+    return this.reportService.getTransactionTrend(officeId);
+  }
+
+  @Get('transactions-by-agent')
+  @ApiOperation({ summary: 'Get transactions grouped by agent for user office' })
+  async getTransactionsByAgent(@Req() request: RequestWithUser) {
+    const officeId = request.user?.office;
+    if (!officeId) throw new ForbiddenException('User office missing');
+    return this.reportService.getTransactionsByAgent(officeId);
   }
 
   // --- ELIMINA O RESTRINGE LOS ENDPOINTS CON /office/:officeId ---

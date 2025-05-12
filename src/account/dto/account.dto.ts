@@ -129,6 +129,75 @@ export class CreateAccountDto {
   receiver_id?: string;
 }
 
+export class UpdateAccountDto {
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  office?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsEnum(['mercadopago', 'paypal'])
+  @IsOptional()
+  wallet?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  alias?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  cbu?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  operator?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  agent?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsEnum(['active', 'inactive'])
+  @IsOptional()
+  status?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  mp_access_token?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  mp_public_key?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  mp_client_id?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  mp_client_secret?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  receiver_id?: string;
+}
+
 export class AccountsResponseDto {
   @ApiProperty({ type: [AccountDto] })
   accounts: AccountDto[];

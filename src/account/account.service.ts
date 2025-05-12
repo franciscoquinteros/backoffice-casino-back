@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/commo
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindManyOptions, FindOneOptions, Repository } from 'typeorm';
 import { Account } from './entities/account.entity';
-import { CreateAccountDto } from './dto/account.dto';
+import { CreateAccountDto, UpdateAccountDto } from './dto/account.dto';
 import { IpnService } from 'src/transactions/transactions.service';
 
 @Injectable()
@@ -125,36 +125,26 @@ export class AccountService {
     return savedAccount;
   }
 
-  /* async update(id: number, updateAccountDto: Partial<CreateAccountDto>): Promise<Account> {
-    const account = await this.findOne(id);
-
-    // Actualizar solo los campos proporcionados
-    Object.assign(account, updateAccountDto);
-
-    // Guardar la cuenta actualizada
-    const updatedAccount = await this.accountRepository.save(account);
-
-    // Si es ahora una cuenta de MercadoPago activa, actualizar en IPN
-    if (updatedAccount.wallet === 'mercadopago' && updatedAccount.status === 'active') {
-      try {
-        await this.ipnService.configureAccount(updatedAccount);
-        console.log(`Configuración de IPN actualizada para cuenta: ${updatedAccount.name} (ID: ${updatedAccount.id})`);
-      } catch (error) {
-        console.error('Error al actualizar configuración en IPN service:', error);
-      }
-    }
-
-    return updatedAccount;
-  } */
-
-  async update(id: number, updateAccountDto: Partial<CreateAccountDto>, officeId: string): Promise<Account> {
+  async update(id: number, updateAccountDto: UpdateAccountDto, officeId: string): Promise<Account> {
     console.log(`AccountService: Actualizando cuenta ID ${id} en oficina ${officeId}`);
     const account = await this.findOne(id, officeId);
 
-    Object.assign(account, updateAccountDto);
+    // Actualizar solo los campos que vienen en el DTO
+    if (updateAccountDto.mp_access_token !== undefined) account.mp_access_token = updateAccountDto.mp_access_token;
+    if (updateAccountDto.mp_public_key !== undefined) account.mp_public_key = updateAccountDto.mp_public_key;
+    if (updateAccountDto.mp_client_id !== undefined) account.mp_client_id = updateAccountDto.mp_client_id;
+    if (updateAccountDto.mp_client_secret !== undefined) account.mp_client_secret = updateAccountDto.mp_client_secret;
+    if (updateAccountDto.receiver_id !== undefined) account.receiver_id = updateAccountDto.receiver_id;
+    if (updateAccountDto.name !== undefined) account.name = updateAccountDto.name;
+    if (updateAccountDto.alias !== undefined) account.alias = updateAccountDto.alias;
+    if (updateAccountDto.cbu !== undefined) account.cbu = updateAccountDto.cbu;
+    if (updateAccountDto.operator !== undefined) account.operator = updateAccountDto.operator;
+    if (updateAccountDto.status !== undefined) account.status = updateAccountDto.status;
+    if (updateAccountDto.wallet !== undefined) account.wallet = updateAccountDto.wallet;
 
     const updatedAccount = await this.accountRepository.save(account);
 
+    // Si es una cuenta de Mercado Pago activa, actualizar la configuración del IPN
     if (updatedAccount.wallet === 'mercadopago' && updatedAccount.status === 'active') {
       try {
         await this.ipnService.configureAccount(updatedAccount);

@@ -6,17 +6,16 @@ import { AuthModule } from '../auth/auth.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TicketAssignment } from './entities/ticket-assignment.entity';
 import { UserModule } from '../users/user.module';
-import { TicketAssignmentRepository } from './ticket-assignment.repository';
 
 @Module({
     imports: [
-        HttpModule, 
+        HttpModule,
         AuthModule,
         TypeOrmModule.forFeature([TicketAssignment]),
         UserModule
     ],
     controllers: [ZendeskController],
-    providers: [ZendeskService, TicketAssignmentRepository],
+    providers: [ZendeskService],
     exports: [ZendeskService],
 })
 export class ZendeskModule { }

@@ -21,10 +21,13 @@ export class UserService {
     }
 
     // --- NUEVO MÉTODO: Buscar por Oficina ---
-    async findAllByOffice(office: string): Promise<User[]> {
-        // Asegúrate que 'office' sea el nombre correcto de la columna en tu UserEntity
-        const whereCondition: FindOptionsWhere<User> = { office: office };
-        return this.userRepository.find({ where: whereCondition });
+    async findAllByOffice(officeId: string): Promise<User[]> {
+        return this.userRepository.find({
+            where: {
+                office: officeId,
+                status: 'active'
+            }
+        });
     }
     // --- FIN NUEVO MÉTODO ---
 
@@ -41,12 +44,12 @@ export class UserService {
 
     async findUsersByRoleAndOffice(role: string, officeId: string): Promise<User[]> {
         return this.userRepository.find({
-          where: {
-            role,
-            office: officeId
-          }
+            where: {
+                role,
+                office: officeId
+            }
         });
-      }
+    }
 
     // --- CREATE: Considera añadir la oficina del creador ---
     async create(createUserDto: CreateUserDto): Promise<User> {

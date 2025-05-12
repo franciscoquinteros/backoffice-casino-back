@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, Param, Delete, Put, HttpCode, HttpStatus, BadRequestException, Query, UseGuards, ParseIntPipe } from '@nestjs/common'; // Añadir ParseIntPipe si es necesario para IDs numéricos
 import { ApiOperation, ApiResponse, ApiTags, ApiQuery } from '@nestjs/swagger'; // Añadir ApiQuery
 import { AccountService } from './account.service';
-import { AccountDto, AccountsResponseDto, CbuSingleResponseDto, CreateAccountDto } from './dto/account.dto';
+import { AccountDto, AccountsResponseDto, CbuSingleResponseDto, CreateAccountDto, UpdateAccountDto } from './dto/account.dto';
 import { ApiKeyAuth } from '../auth/apikeys/decorators/api-key-auth.decorator';
 import { API_PERMISSIONS } from '../auth/apikeys/permissions.constants';
 
@@ -93,21 +93,19 @@ export class AccountController {
 
     @Put(':id')
     @ApiOperation({ summary: 'Update an account (within a specific office)' })
-    @ApiQuery({ name: 'officeId', required: true, description: 'ID of the office the account belongs to', type: String }) // Documentar officeId
+    @ApiQuery({ name: 'officeId', required: true, description: 'ID of the office the account belongs to', type: String })
     @ApiResponse({ status: 200, description: 'The account has been successfully updated', type: AccountDto })
     @ApiResponse({ status: 400, description: 'officeId query parameter is required or invalid body' })
     @ApiResponse({ status: 404, description: 'Account not found in the specified office' })
-    // @UseGuards(ApiKeyAuth) // Mantener si aplica
     async update(
-        @Param('id', ParseIntPipe) id: number, // Usar ParseIntPipe si el ID es número
-        @Body() updateAccountDto: Partial<CreateAccountDto>,
-        @Query('officeId') officeId: string // Recibir officeId como query param
+        @Param('id', ParseIntPipe) id: number,
+        @Body() updateAccountDto: UpdateAccountDto,
+        @Query('officeId') officeId: string
     ): Promise<AccountDto> {
         if (!officeId) {
             throw new BadRequestException('officeId query parameter is required');
         }
         console.log(`[AccountController] update: Filtering by officeId: ${officeId} for account ID: ${id}`);
-        // El servicio ya espera el officeId como tercer argumento
         return this.accountService.update(id, updateAccountDto, officeId);
     }
 

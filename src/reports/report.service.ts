@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, In, IsNull, Not, Repository } from 'typeorm';
 import { ChatService } from '../chat/chat.service';
@@ -11,6 +11,7 @@ import { Conversation } from '../chat/entities/conversation.entity';
 import { OfficeService } from 'src/office/office.service';
 import { Office } from 'src/office/entities/office.entity';
 import { TicketAssignment } from 'src/ticketing/entities/ticket-assignment.entity';
+import { IpnService } from '../transactions/transactions.service';
 
 // Interfaces simplificadas para tipado
 interface TicketResponse {
@@ -53,7 +54,9 @@ export class ReportService {
         @InjectRepository(Office)
         private readonly officeRepository: Repository<Office>,
         @InjectRepository(TicketAssignment)
-        private readonly ticketAssignmentRepository: Repository<TicketAssignment>
+        private readonly ticketAssignmentRepository: Repository<TicketAssignment>,
+        @Inject(forwardRef(() => IpnService))
+        private readonly ipnService: IpnService
     ) { }
 
 
@@ -1239,4 +1242,82 @@ export class ReportService {
             return [];
         }
     }
+
+    // --- NUEVOS MÉTODOS PARA REPORTES DE TRANSACCIONES ---
+    async getTransactionSummary(officeId: string) {
+        const transactions = await this.ipnService.getTransactions(officeId);
+        const total = transactions.length;
+        const deposits = transactions.filter(tx => tx.type === 'deposit').length;
+        const withdraws = transactions.filter(tx => tx.type === 'withdraw').length;
+        return { total, deposits, withdraws };
+    }
+
+    async getTransactionsByStatus(officeId: string) {
+        const transactions = await this.ipnService.getTransactions(officeId);
+        const statusMap: Record<string, number> = {
+            'Aceptado': 0,
+            'Rechazado': 0,
+            'Pendiente': 0
+        };
+        transactions.forEach(tx => {
+            // Normaliza el estado para que coincida con los tres permitidos
+            let status = (tx.status || '').toLowerCase();
+            if (status === 'aceptado' || status === 'approved') status = 'Aceptado';
+            else if (status === 'rechazado' || status === 'rejected' || status === 'error') status = 'Rechazado';
+            else if (status === 'pendiente' || status === 'pending') status = 'Pendiente';
+            else return; // Ignora otros estados
+            statusMap[status] = (statusMap[status] || 0) + 1;
+        });
+        return Object.entries(statusMap).map(([name, value]) => ({ name, value }));
+    }
+
+    async getTransactionTrend(officeId: string) {
+        const transactions = await this.ipnService.getTransactions(officeId);
+        const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+        // Inicializa estructura para depósitos y retiros
+        const monthlyDeposits: Record<string, number> = {};
+        const monthlyWithdraws: Record<string, number> = {};
+        monthNames.forEach(m => {
+            monthlyDeposits[m] = 0;
+            monthlyWithdraws[m] = 0;
+        });
+        console.log('[getTransactionTrend] Transacciones recibidas:', transactions);
+        transactions.forEach(tx => {
+            if (tx.date_created) {
+                const date = new Date(tx.date_created);
+                const month = monthNames[date.getMonth()];
+                if (tx.type === 'deposit') monthlyDeposits[month] += 1;
+                if (tx.type === 'withdraw') monthlyWithdraws[month] += 1;
+            }
+        });
+        // Solo los últimos 6 meses con datos
+        const depositsTrend = monthNames
+            .map(mes => ({ mes, cantidad: monthlyDeposits[mes] }))
+            .filter(item => item.cantidad > 0)
+            .slice(-6);
+        const withdrawsTrend = monthNames
+            .map(mes => ({ mes, cantidad: monthlyWithdraws[mes] }))
+            .filter(item => item.cantidad > 0)
+            .slice(-6);
+        return {
+            deposits: depositsTrend,
+            withdraws: withdrawsTrend
+        };
+    }
+
+    async getTransactionsByAgent(officeId: string) {
+        const transactions = await this.ipnService.getTransactions(officeId);
+        console.log('[getTransactionsByAgent] Transacciones recibidas:', transactions);
+        const agentMap: Record<string, number> = {};
+        transactions.forEach(tx => {
+            const agent = tx.idCliente || tx.payer_id || 'Sin agente';
+            agentMap[agent] = (agentMap[agent] || 0) + 1;
+        });
+        const result = Object.entries(agentMap)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value);
+        console.log('[getTransactionsByAgent] Agrupamiento por agente:', result);
+        return result;
+    }
+    // --- FIN NUEVOS MÉTODOS ---
 }

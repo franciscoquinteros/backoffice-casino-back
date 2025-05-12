@@ -9,7 +9,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TicketAssignment } from './entities/ticket-assignment.entity';
 import { UserService } from '../users/user.service';
-import { TicketAssignmentRepository } from './ticket-assignment.repository';
 
 @Injectable()
 export class ZendeskService {
@@ -17,9 +16,8 @@ export class ZendeskService {
     constructor(
         private readonly httpService: HttpService,
         @InjectRepository(TicketAssignment)
-        private readonly ticketAssignmentRepo: Repository<TicketAssignment>,
-        private readonly userService: UserService,
-        private readonly ticketAssignmentRepository: TicketAssignmentRepository
+        private readonly ticketAssignmentRepository: Repository<TicketAssignment>,
+        private readonly userService: UserService
     ) { }
     private ws: WebSocket | null = null; // Propiedad para almacenar el WebSocket
 
@@ -28,7 +26,7 @@ export class ZendeskService {
         return this.userService;
     }
 
-    getTicketAssignmentRepository(): TicketAssignmentRepository {
+    getTicketAssignmentRepository(): Repository<TicketAssignment> {
         return this.ticketAssignmentRepository;
     }
 
@@ -282,8 +280,11 @@ export class ZendeskService {
     }
 
     async getTicketAssignmentsForUserOffice(officeId: string): Promise<TicketAssignment[]> {
-        // Usamos el nuevo método findByOffice del repository
-        return this.ticketAssignmentRepository.findByOffice(officeId);
+        return this.ticketAssignmentRepository
+            .createQueryBuilder('assignment')
+            .leftJoinAndSelect('assignment.user', 'user')
+            .where('user.office = :officeId', { officeId })
+            .getMany();
     }
 
     async createAgent(createAgentDto: CreateAgentDto): Promise<UserResponseDto> {

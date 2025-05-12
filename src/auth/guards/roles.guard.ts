@@ -5,16 +5,16 @@ import { ROLES_KEY } from '../decorators/roles.decorator'; // Importa la clave d
 
 // Interfaz para el usuario que esperamos en request.user (del JwtStrategy)
 interface AuthenticatedUser {
-    id: string | number;
-    office: string;
-    role: string; // <-- El campo de rol es crucial aquí
+  id: string | number;
+  office: string;
+  role: string; // <-- El campo de rol es crucial aquí
 }
 
 @Injectable()
 export class RolesGuard implements CanActivate {
   private readonly logger = new Logger(RolesGuard.name);
 
-  constructor(private reflector: Reflector) {} // Inyecta Reflector
+  constructor(private reflector: Reflector) { } // Inyecta Reflector
 
   canActivate(context: ExecutionContext): boolean {
     // 1. Obtener los roles requeridos para esta ruta (definidos con @Roles)
@@ -34,8 +34,13 @@ export class RolesGuard implements CanActivate {
 
     // Si no hay usuario o no tiene rol, denegar acceso
     if (!user || !user.role) {
-       this.logger.warn(`RolesGuard blocked access: User object or user role missing in request.`);
+      this.logger.warn(`RolesGuard blocked access: User object or user role missing in request.`);
       throw new ForbiddenException('Access denied: User role information is missing.');
+    }
+
+    // Acceso universal para superadmin
+    if (user.role === 'superadmin') {
+      return true;
     }
 
     this.logger.debug(`RolesGuard: User Role='${user.role}', Required Roles='${requiredRoles.join(',')}'`);
@@ -44,10 +49,10 @@ export class RolesGuard implements CanActivate {
     const hasRequiredRole = requiredRoles.some((role) => user.role === role);
 
     if (hasRequiredRole) {
-        this.logger.debug(`RolesGuard: Access granted.`);
+      this.logger.debug(`RolesGuard: Access granted.`);
       return true; // Permitir acceso
     } else {
-         this.logger.warn(`RolesGuard blocked access: User role '${user.role}' does not match required roles '${requiredRoles.join(',')}'.`);
+      this.logger.warn(`RolesGuard blocked access: User role '${user.role}' does not match required roles '${requiredRoles.join(',')}'.`);
       // Lanzar excepción Forbidden si el rol no coincide
       throw new ForbiddenException(`Access denied: Required role(s): ${requiredRoles.join(', ')}`);
     }

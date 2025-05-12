@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { HttpModule } from '@nestjs/axios';
 import { ReportController } from './report.controller';
 import { ReportService } from './report.service';
 import { ZendeskModule } from '../ticketing/zendesk.module';
@@ -11,6 +12,12 @@ import { Conversation } from '../chat/entities/conversation.entity';
 import { OfficeModule } from 'src/office/office.module';
 import { Office } from 'src/office/entities/office.entity';
 import { TicketAssignment } from 'src/ticketing/entities/ticket-assignment.entity';
+import { ZendeskService } from '../ticketing/zendesk.service';
+import { ChatService } from '../chat/chat.service';
+import { UserService } from '../users/user.service';
+import { ConversationService } from '../chat/conversation.service';
+import { OfficeService } from '../office/office.service';
+import { IpnModule } from '../transactions/transactions.module';
 
 @Module({
   imports: [
@@ -24,10 +31,19 @@ import { TicketAssignment } from 'src/ticketing/entities/ticket-assignment.entit
     ZendeskModule,
     ChatModule,
     UserModule,
-    OfficeModule
+    OfficeModule,
+    forwardRef(() => IpnModule),
+    HttpModule,
   ],
   controllers: [ReportController],
-  providers: [ReportService],
+  providers: [
+    ReportService,
+    ZendeskService,
+    ChatService,
+    UserService,
+    ConversationService,
+    OfficeService
+  ],
   exports: [ReportService]
 })
 export class ReportModule { }

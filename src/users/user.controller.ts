@@ -11,6 +11,8 @@ import { UpdatePasswordDto } from './dto/update-password.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UserService } from './user.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'; // <-- Importa tu Guard
+import { RolesGuard } from '../auth/guards/roles.guard'; // <-- Importa RolesGuard
+import { Roles } from '../auth/decorators/roles.decorator'; // <-- Importa Roles
 import { Request } from 'express'; // Importa Request
 
 // Interfaz para el request con usuario (igual que en TransactionsController)
@@ -27,7 +29,7 @@ interface RequestWithUser extends Request {
 @ApiTags('Users')
 @Controller('users')
 @UseInterceptors(ClassSerializerInterceptor) // Excluye @Password() en respuestas
-@UseGuards(JwtAuthGuard) // <-- APLICA GUARD A TODO EL CONTROLADOR
+@UseGuards(JwtAuthGuard, RolesGuard) // <-- Añade RolesGuard
 @ApiBearerAuth()         // <-- Documenta Auth para Swagger
 export class UserController {
   constructor(
@@ -47,6 +49,7 @@ export class UserController {
   }
 
   @Post()
+  @Roles('admin', 'superadmin')
   @ApiOperation({ summary: 'Create a new user (restricted by office)' })
   @ApiResponse({ status: 201, description: 'User created', type: UserResponseDto })
   @ApiResponse({ status: 400, description: 'Bad request' })
@@ -67,6 +70,7 @@ export class UserController {
   }
 
   @Get()
+  @Roles('operador', 'encargado', 'admin', 'superadmin')
   @ApiOperation({ summary: 'Get users (filtered by user office)' })
   @ApiResponse({ status: 200, description: 'List of users for the office', type: [UserResponseDto] })
   @ApiResponse({ status: 403, description: 'Forbidden' })
@@ -75,15 +79,8 @@ export class UserController {
     if (!user?.office) { throw new ForbiddenException("User office information missing."); }
 
     let users;
-    // Lógica Opcional: Si es superadmin, puede ver todos
-    // if (user.role === 'superadmin') {
-    //     console.log("Fetching all users for superadmin");
-    //     users = await this.userService.findAll();
-    // } else {
-    console.log(`Workspaceing users for office: ${user.office}`);
-    // Llama al nuevo método del servicio filtrando por oficina
+    console.log(`Fetching users for office: ${user.office}`);
     users = await this.userService.findAllByOffice(user.office);
-    // }
 
     return users.map(user => new UserResponseDto(user));
   }
@@ -172,6 +169,7 @@ export class UserController {
   }
 
   @Delete(':id')
+  @Roles('admin', 'superadmin')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a user (restricted by office)' })
   // ... ApiResponses ...
