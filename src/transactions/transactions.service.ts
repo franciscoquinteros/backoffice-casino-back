@@ -508,6 +508,22 @@ export class IpnService implements OnModuleInit {
           return false;
         }
 
+        // --- Matching por email o DNI ---
+        const mpEmail = savedMpTransaction.payer_email?.toLowerCase();
+        const extEmail = externalTx.payer_email?.toLowerCase();
+        const mpDni = this.extractDniFromCuit(
+          typeof savedMpTransaction.payer_identification === 'object' && savedMpTransaction.payer_identification?.number
+            ? savedMpTransaction.payer_identification.number
+            : undefined
+        );
+        const extDni = this.extractDniFromCuit(
+          typeof externalTx.payer_identification === 'object' && externalTx.payer_identification?.number
+            ? externalTx.payer_identification.number
+            : undefined
+        );
+        const matchEmail = mpEmail && extEmail && mpEmail === extEmail;
+        const matchDni = mpDni && extDni && mpDni === extDni;
+
         return (
           externalTx.type === 'deposit' &&
           externalTx.status === 'Pending' &&
@@ -516,8 +532,8 @@ export class IpnService implements OnModuleInit {
           externalTx.amount === savedMpTransaction.amount &&
           externalTx.cbu &&
           this.matchCbuWithMp(savedMpTransaction, externalTx.cbu) &&
-          savedMpTransaction.payer_email && externalTx.payer_email &&
-          savedMpTransaction.payer_email.toLowerCase() === externalTx.payer_email.toLowerCase() &&
+          // --- MATCH por email o por DNI ---
+          (matchEmail || matchDni) &&
           externalTx.date_created && savedMpTransaction.date_created &&
           this.isDateCloseEnough(savedMpTransaction.date_created, externalTx.date_created) &&
           externalTx.office === savedMpTransaction.office // Asegurar que coincidan las oficinas
@@ -1045,5 +1061,12 @@ export class IpnService implements OnModuleInit {
 
     console.warn(`mapCbuToMpIdentifier: No se encontró un identificador mp_client_id configurado para el CBU: ${cbu}`);
     return '';
+  }
+
+  // Helper para extraer el DNI de un CUIT/CUIL (8 dígitos del medio)
+  private extractDniFromCuit(cuit: string | undefined | null): string | null {
+    if (!cuit || cuit.length < 11) return null;
+    // CUIT/CUIL: XX-XXXXXXXX-X
+    return cuit.substring(2, 10); // 8 dígitos del medio
   }
 }
