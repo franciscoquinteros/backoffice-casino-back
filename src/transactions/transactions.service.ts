@@ -443,6 +443,8 @@ export class IpnService implements OnModuleInit {
       payment_method_id: apiData.payment_method_id,
       transaction_details: apiData.transaction_details
     });
+    // Log completo de la respuesta de la API de Mercado Pago
+    console.log(`[IPN] ${paymentId}: Respuesta COMPLETA de la API de Mercado Pago:`, JSON.stringify(apiData, null, 2));
 
     // Obtener el receiver_id de la respuesta
     const receiverId = apiData.collector_id || apiData.receiver_id;
@@ -565,7 +567,7 @@ export class IpnService implements OnModuleInit {
               });
             }
             console.log(`[IPN] ${savedMpTransaction.id}: FIN: Transacción ${matchingExternalDeposit.id} aceptada automáticamente.`);
-      } else {
+          } else {
             const errorMsg = proxyResponse.data?.error_message || 'Error desconocido del proxy';
             console.error(`[IPN] ${savedMpTransaction.id}: ERROR: Proxy rechazó la transacción ${matchingExternalDeposit.id}. Razón: ${errorMsg}`);
             await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Error');
@@ -580,7 +582,7 @@ export class IpnService implements OnModuleInit {
 
         console.log(`[IPN] ${savedMpTransaction.id}: Depósito externo ${matchingExternalDeposit.id} marcado como Match.`);
         console.log(`[IPN] ${savedMpTransaction.id}: Transacción MP marcada como Aceptado.`);
-    } else {
+      } else {
         console.log(`[IPN] ${savedMpTransaction.id}: No se encontró depósito externo coincidente.`);
       }
     }
@@ -784,19 +786,19 @@ export class IpnService implements OnModuleInit {
             });
           }
           console.log(`[${opId}] FIN: Transacción ${savedUserTransaction.id} aceptada automáticamente.`);
-      return {
-        status: 'success',
+          return {
+            status: 'success',
             message: 'Depósito validado y procesado automáticamente.',
             transaction: updatedTransaction!
-      };
-    } else {
+          };
+        } else {
           const errorMsg = proxyResponse.data?.error_message || 'Error desconocido del proxy';
           console.error(`[${opId}] ERROR: Proxy rechazó la transacción ${savedUserTransaction.id}. Razón: ${errorMsg}`);
           await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Error');
           await this.updateTransactionDescription(savedUserTransaction.id.toString(), `Error del Proxy: ${errorMsg}`);
           throw new Error(`Error en el procesamiento del proxy: ${errorMsg}`);
-          }
-        } catch (error) {
+        }
+      } catch (error) {
         console.error(`[${opId}] ERROR: Falló la comunicación con el proxy para la transacción ${savedUserTransaction.id}:`, error.message);
         await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Error');
         const commErrorMsg = error.response?.data?.message || error.message || 'Error de comunicación con el proxy';
