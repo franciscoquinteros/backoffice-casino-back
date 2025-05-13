@@ -10,6 +10,11 @@ import { Repository } from 'typeorm';
 import { TicketAssignment } from './entities/ticket-assignment.entity';
 import { UserService } from '../users/user.service';
 
+// Constantes para campos personalizados
+const MONEY_GROUP_ID = '34157406608155';
+const MONEY_CUSTOM_FIELD_ID = 34161101814811;
+const OFFICE_CUSTOM_FIELD_ID = 2; // ID del campo personalizado para la oficina
+
 @Injectable()
 export class ZendeskService {
     private readonly logger = new Logger(ZendeskService.name);
@@ -172,13 +177,12 @@ export class ZendeskService {
         }
     } */
 
-    async getAllTickets(officeId?: string): Promise<TicketResponseDto[]> { // <-- Aceptar officeId opcional
+    async getAllTickets(officeId?: string): Promise<TicketResponseDto[]> {
         const auth = Buffer.from(`${env.ZENDESK_EMAIL}/token:${env.ZENDESK_TOKEN}`).toString('base64');
-        console.log(`ZendeskService: Obteniendo todos los tickets${officeId ? ` para oficina ${officeId}` : ''}`);
-
+        this.logger.log(`Fetching tickets${officeId ? ` for office ${officeId}` : ''}`);
 
         try {
-            // 1. Obtener todos los usuarios de Zendesk (necesario para el mapeo de tickets)
+            // 1. Obtener usuarios de Zendesk
             const usersResponse = await firstValueFrom(
                 this.httpService.get(`${env.ZENDESK_URL_USERS}`, {
                     headers: {
@@ -187,94 +191,81 @@ export class ZendeskService {
                     },
                 })
             );
-            const zendeskUsers: User[] = usersResponse.data.users; // Renombrado para evitar conflicto con InternalUser
+            const zendeskUsers: User[] = usersResponse.data.users;
 
-            // 2. Obtener TODOS los tickets de Zendesk
-            // NOTA: No podemos filtrar por oficina aquí, la API de Zendesk no tiene ese concepto interno.
-            const ticketsResponse: AxiosResponse<{ tickets: TicketWithoutUser[] }> = await firstValueFrom(
-                this.httpService.get(`${env.ZENDESK_URL_TICKETS}`, {
-                    headers: {
-                        'Authorization': `Basic ${auth}`,
-                        'Content-Type': 'application/json',
-                    },
-                })
-            );
-            const allZendeskTickets = ticketsResponse.data.tickets;
+            // 2. Obtener tickets de Zendesk
+            let ticketsResponse: AxiosResponse<{ tickets: TicketWithoutUser[] }>;
 
-            // 3. Obtener TODAS las asignaciones de tickets INTERNAS
-            // NOTA: No filtramos por oficina aquí todavía, obtenemos todas para poder mapear.
-            const allTicketAssignments = await this.ticketAssignmentRepository.find({
-                relations: ['user'] // Cargar la relación con el usuario interno para acceder a su oficina
-            });
-
-            // Crear un mapa para búsqueda rápida de asignaciones por zendeskTicketId
-            const assignmentMap = new Map<string, TicketAssignment>();
-            allTicketAssignments.forEach(assignment => {
-                assignmentMap.set(assignment.zendeskTicketId, assignment);
-            });
-
-            // 4. Mapear tickets de Zendesk a TicketResponseDto y APLICAR EL FILTRO POR OFICINA
-            const filteredTickets: TicketResponseDto[] = [];
-
-            for (const ticket of allZendeskTickets) {
-                // Buscar la asignación interna para este ticket
-                const ticketAssignment = assignmentMap.get(ticket.id.toString());
-
-                // --- LÓGICA DE FILTRADO POR OFICINA ---
-                let includeTicket = true; // Por defecto, incluir el ticket
-
-                if (officeId) {
-                    // Si se requiere filtrar por oficina:
-                    // Solo incluir el ticket si tiene una asignación interna
-                    // Y el usuario asignado internamente pertenece a la oficina especificada.
-                    if (!ticketAssignment || !ticketAssignment.user || ticketAssignment.user.office !== officeId) {
-                        includeTicket = false; // No incluir si no hay asignación válida en la oficina
-                    }
-                }
-                // --- FIN LÓGICA DE FILTRADO POR OFICINA ---
-
-
-                if (includeTicket) {
-                    // Si el ticket debe ser incluido (cumple el filtro o no hay filtro)
-
-                    // Buscar usuario solicitante de Zendesk
-                    const requesterUser = zendeskUsers.find(user => user.id === ticket.requester_id);
-
-                    // Preparar la información del operador asignado interno (si existe y se cargó la relación)
-                    let internalAssignee = undefined;
-                    if (ticketAssignment && ticketAssignment.user) {
-                        internalAssignee = {
-                            id: ticketAssignment.user.id,
-                            username: ticketAssignment.user.username, // Asumiendo que tu User tiene username
-                            email: ticketAssignment.user.email
-                        };
-                    }
-
-                    // Mapear a TicketResponseDto
-                    filteredTickets.push({
-                        id: ticket.id,
-                        subject: ticket.subject,
-                        description: ticket.description,
-                        status: ticket.status,
-                        requester_id: ticket.requester_id,
-                        assignee_id: ticket.assignee_id, // ID del asignado en Zendesk
-                        user: requesterUser ? { // Información del solicitante de Zendesk
-                            name: requesterUser.name,
-                            email: requesterUser.email,
-                            // Puedes añadir más campos de ZendeskUser si los necesitas en el frontend
-                        } : undefined,
-                        group_id: ticket.group_id,
-                        custom_fields: ticket.custom_fields,
-                        internal_assignee: internalAssignee // Información del asignado INTERNO (desde TicketAssignment)
-                    });
-                }
+            if (officeId) {
+                // Usar búsqueda avanzada para filtrar por tag (officeId)
+                const searchResponse = await firstValueFrom(
+                    this.httpService.get(`${env.ZENDESK_URL}/api/v2/search.json`, {
+                        headers: {
+                            'Authorization': `Basic ${auth}`,
+                            'Content-Type': 'application/json',
+                        },
+                        params: {
+                            query: `type:ticket tags:${officeId}`
+                        }
+                    })
+                );
+                ticketsResponse = {
+                    data: { tickets: searchResponse.data.results },
+                    status: searchResponse.status,
+                    statusText: searchResponse.statusText,
+                    headers: searchResponse.headers,
+                    config: searchResponse.config
+                };
+            } else {
+                // Obtener todos los tickets
+                ticketsResponse = await firstValueFrom(
+                    this.httpService.get(`${env.ZENDESK_URL_TICKETS}`, {
+                        headers: {
+                            'Authorization': `Basic ${auth}`,
+                            'Content-Type': 'application/json',
+                        },
+                    })
+                );
             }
 
+            const tickets = ticketsResponse.data.tickets;
+            this.logger.log(`Found ${tickets.length} tickets`);
 
-            console.log(`ZendeskService: Obtenidos ${filteredTickets.length} tickets` + (officeId ? ` filtrados para oficina ${officeId}` : ''));
-            return filteredTickets; // Devuelve la lista de tickets FILTRADA
+            // 3. Obtener asignaciones internas
+            const ticketAssignments = await this.ticketAssignmentRepository.find({
+                relations: ['user']
+            });
+            const assignmentMap = new Map(
+                ticketAssignments.map(assignment => [assignment.zendeskTicketId, assignment])
+            );
+
+            // 4. Mapear tickets a DTOs
+            return tickets.map(ticket => {
+                const assignment = assignmentMap.get(ticket.id.toString());
+                const requesterUser = zendeskUsers.find(user => user.id === ticket.requester_id);
+
+                return {
+                    id: ticket.id,
+                    subject: ticket.subject,
+                    description: ticket.description,
+                    status: ticket.status,
+                    requester_id: ticket.requester_id,
+                    assignee_id: ticket.assignee_id,
+                    user: requesterUser ? {
+                        name: requesterUser.name,
+                        email: requesterUser.email,
+                    } : undefined,
+                    group_id: ticket.group_id,
+                    custom_fields: ticket.custom_fields,
+                    internal_assignee: assignment?.user ? {
+                        id: assignment.user.id,
+                        name: assignment.user.username,
+                        email: assignment.user.email
+                    } : undefined
+                };
+            });
         } catch (error) {
-            this.logger.error(`Error fetching all tickets: ${error.message}`, error.stack);
+            this.logger.error(`Error fetching tickets: ${error.message}`, error.stack);
             throw new Error(`Error fetching tickets: ${error.message}`);
         }
     }
@@ -746,32 +737,41 @@ export class ZendeskService {
 
     async createTicket(createTicketDto: CreateTicketDto) {
         const auth = Buffer.from(`${env.ZENDESK_EMAIL}/token:${env.ZENDESK_TOKEN}`).toString('base64');
-        const MONEY_GROUP_ID = '34157406608155';
-        const MONEY_CUSTOM_FIELD_ID = 34161101814811;
 
+        // 1. Crear o encontrar el usuario en Zendesk
         const zendeskUserId = await this.createUserIfNotExists(createTicketDto.email);
-        console.log(zendeskUserId, 'userId on createTicket');
         if (zendeskUserId === null) {
             throw new Error('Failed to create or find user.');
         }
 
-        // Check if this is a money-related ticket by checking the custom field value
-        const moneyCustomField = createTicketDto.custom_fields?.find(
+        // 2. Preparar los campos personalizados
+        const customFields = [
+            ...(createTicketDto.custom_fields || []),
+            {
+                id: OFFICE_CUSTOM_FIELD_ID,
+                value: createTicketDto.officeId
+            }
+        ];
+
+        // 3. Verificar si es un ticket de dinero
+        const moneyCustomField = customFields.find(
             field => field.id === MONEY_CUSTOM_FIELD_ID
         );
         const isMoneyTicket = moneyCustomField?.value === "Dinero";
 
+        // 4. Preparar los datos del ticket
         const ticketData = {
             ticket: {
                 subject: createTicketDto.subject,
                 description: createTicketDto.description,
                 requester_id: zendeskUserId,
-                custom_fields: createTicketDto.custom_fields,
+                custom_fields: customFields,
                 ...(isMoneyTicket && { group_id: parseInt(MONEY_GROUP_ID) })
             },
         };
 
         try {
+            // 5. Crear el ticket en Zendesk
             const response: AxiosResponse<{ ticket: Ticket }> = await firstValueFrom(
                 this.httpService.post(env.ZENDESK_URL_TICKETS, ticketData, {
                     headers: {
@@ -782,42 +782,32 @@ export class ZendeskService {
             );
 
             const ticket = response.data.ticket;
+            this.logger.log(`Ticket created successfully with ID: ${ticket.id} for office: ${createTicketDto.officeId}`);
 
-            // Always assign tickets to an "operador" user, regardless of ticket type
+            // 6. Asignar el ticket a un operador
             try {
-                // Get all operator users from our database
                 const operatorUsers = await this.userService.findUsersByRole('operador');
-                console.log('Operadores encontrados:', operatorUsers.length, operatorUsers.map(op => op.username));
-
                 if (operatorUsers.length > 0) {
-                    // Get ticket assignments count for each operator
                     const operatorTicketCounts = await Promise.all(
                         operatorUsers.map(async (operator) => {
                             const ticketCount = await this.ticketAssignmentRepository.count({
                                 where: { userId: operator.id, status: 'open' }
                             });
-                            console.log(`Operador ${operator.username} tiene ${ticketCount} tickets`);
-                            return {
-                                user: operator,
-                                ticketCount
-                            };
+                            return { user: operator, ticketCount };
                         })
                     );
 
-                    // Find the operator with the least tickets
                     const operatorWithLeastTickets = operatorTicketCounts.reduce((prev, current) =>
                         prev.ticketCount <= current.ticketCount ? prev : current
                     );
 
-                    console.log('Asignando ticket a operador:', operatorWithLeastTickets.user.username);
-
-                    // Still assign in Zendesk, but we'll use our internal assignment too
+                    // Asignar en Zendesk
                     await this.asignTicket(
                         ticket.id.toString(),
                         ticket.assignee_id ? ticket.assignee_id.toString() : null
                     );
 
-                    // Create internal ticket assignment
+                    // Crear asignación interna
                     const ticketAssignment = this.ticketAssignmentRepository.create({
                         ticketId: parseInt(ticket.id.toString()),
                         zendeskTicketId: ticket.id.toString(),
@@ -825,10 +815,9 @@ export class ZendeskService {
                         status: 'open'
                     });
                     await this.ticketAssignmentRepository.save(ticketAssignment);
-                    console.log('Ticket assignment creado:', ticketAssignment);
 
-                    // Update the Zendesk ticket response with our internal assignment info
-                    const updatedTicket = {
+                    // Actualizar la respuesta con la información del asignado interno
+                    return {
                         ...ticket,
                         internal_assignee: {
                             id: operatorWithLeastTickets.user.id,
@@ -836,40 +825,14 @@ export class ZendeskService {
                             email: operatorWithLeastTickets.user.email
                         }
                     };
-
-                    return {
-                        id: updatedTicket.id,
-                        subject: updatedTicket.subject,
-                        description: updatedTicket.description,
-                        status: updatedTicket.status,
-                        requester_id: updatedTicket.requester_id,
-                        assignee_id: updatedTicket.assignee_id,
-                        user: updatedTicket.user,
-                        group_id: updatedTicket.group_id,
-                        custom_fields: updatedTicket.custom_fields,
-                        internal_assignee: updatedTicket.internal_assignee
-                    };
-                } else {
-                    console.log('No se encontraron operadores para asignar el ticket');
                 }
             } catch (error) {
-                console.error('Error al asignar ticket a operador:', error);
-                // Return the original ticket if there's an error in assignment
+                this.logger.error(`Error assigning ticket to operator: ${error.message}`);
             }
 
-            return {
-                id: ticket.id,
-                subject: ticket.subject,
-                description: ticket.description,
-                status: ticket.status,
-                requester_id: ticket.requester_id,
-                assignee_id: ticket.assignee_id,
-                user: ticket.user,
-                group_id: ticket.group_id,
-                custom_fields: ticket.custom_fields
-            };
+            return ticket;
         } catch (error) {
-            console.error('Zendesk API Error:', error.response?.data || error.message);
+            this.logger.error('Error creating ticket:', error.response?.data || error.message);
             throw new Error(`Error creating ticket: ${error.response?.data?.error || error.message}`);
         }
     }
@@ -1173,7 +1136,8 @@ export class ZendeskService {
                 requester_id: ticket.requester_id,
                 assignee_id: ticket.assignee_id,
                 user: ticket.user,
-                group_id: ticket.group_id
+                group_id: ticket.group_id,
+                custom_fields: ticket.custom_fields
             };
         } catch (error) {
             throw new Error(`Error assigning ticket: ${error.response?.data || error.message}`);
@@ -1203,8 +1167,6 @@ export class ZendeskService {
 
         this.logger.log(`Ticket ${ticketId} assigned internally to operator ${operatorId}`);
     }
-
-
 
     async getTicketsAssignedToOperator(operatorId: number): Promise<TicketResponseDto[]> {
         const ticketAssignments = await this.ticketAssignmentRepository.find({

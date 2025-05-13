@@ -16,7 +16,14 @@ export class CreateTicketDto {
   description: string;
 
   @ApiProperty({
-    description: 'Custom field of the ticket',
+    description: 'Office ID - Required to associate the ticket with a specific office',
+    example: '123456'
+  })
+  @IsString()
+  officeId: string;
+
+  @ApiProperty({
+    description: 'Custom fields for the ticket',
     example: [{ id: 1, value: 'Custom value' }],
     type: 'array',
   })
