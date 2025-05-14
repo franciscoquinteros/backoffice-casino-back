@@ -575,8 +575,7 @@ export class IpnService implements OnModuleInit {
           console.log(`[IPN] ${savedMpTransaction.id}: Respuesta del proxy recibida:`, proxyResponse.data);
 
           if (proxyResponse.data?.status === 0) {
-            console.log(`[IPN] ${savedMpTransaction.id}: SUCCESS: Proxy aceptó la transacción. Actualizando estado a Aceptado.`);
-            const updatedTransaction = await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Aceptado');
+            console.log(`[IPN] ${savedMpTransaction.id}: SUCCESS: Proxy aceptó la transacción.`);
             if (proxyResponse.data.result?.new_balance) {
               await this.updateTransactionInfo(matchingExternalDeposit.id.toString(), {
                 externalBalance: proxyResponse.data.result.new_balance
@@ -794,8 +793,7 @@ export class IpnService implements OnModuleInit {
         console.log(`[${opId}] Respuesta del proxy recibida:`, proxyResponse.data);
 
         if (proxyResponse.data?.status === 0) {
-          console.log(`[${opId}] SUCCESS: Proxy aceptó la transacción. Actualizando estado a Aceptado.`);
-          const updatedTransaction = await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Aceptado');
+          console.log(`[${opId}] SUCCESS: Proxy aceptó la transacción.`);
           if (proxyResponse.data.result?.new_balance) {
             await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
               externalBalance: proxyResponse.data.result.new_balance
@@ -805,7 +803,7 @@ export class IpnService implements OnModuleInit {
           return {
             status: 'success',
             message: 'Depósito validado y procesado automáticamente.',
-            transaction: updatedTransaction!
+            transaction: savedUserTransaction
           };
         } else {
           const errorMsg = proxyResponse.data?.error_message || 'Error desconocido del proxy';
