@@ -521,6 +521,8 @@ export class IpnService implements OnModuleInit {
             ? externalTx.payer_identification.number
             : undefined
         );
+        const extEmailOrDni = externalTx.payer_email?.toLowerCase();
+        const matchDniEmail = mpDni && extEmailOrDni && mpDni === extEmailOrDni;
         const matchEmail = mpEmail && extEmail && mpEmail === extEmail;
         const matchDni = mpDni && extDni && mpDni === extDni;
 
@@ -533,7 +535,7 @@ export class IpnService implements OnModuleInit {
           externalTx.cbu &&
           this.matchCbuWithMp(savedMpTransaction, externalTx.cbu) &&
           // --- MATCH por email o por DNI ---
-          (matchEmail || matchDni) &&
+          (matchEmail || matchDni || matchDniEmail) &&
           externalTx.date_created && savedMpTransaction.date_created &&
           this.isDateCloseEnough(savedMpTransaction.date_created, externalTx.date_created) &&
           externalTx.office === savedMpTransaction.office // Asegurar que coincidan las oficinas
