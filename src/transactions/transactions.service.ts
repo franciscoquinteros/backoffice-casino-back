@@ -560,7 +560,6 @@ export class IpnService implements OnModuleInit {
 
         await this.updateTransactionInfo(savedMpTransaction.id.toString(), {
           relatedUserTransactionId: matchingExternalDeposit.id.toString(),
-          description: `Transacción match con depósito externo ID: ${matchingExternalDeposit.id}`,
           office: savedMpTransaction.office
         });
 
@@ -778,8 +777,7 @@ export class IpnService implements OnModuleInit {
 
       await this.updateTransactionInfo(matchingTransaction.id.toString(), {
         relatedUserTransactionId: savedUserTransaction.id.toString(),
-        description: `Transacción match con depósito externo ID: ${savedUserTransaction.id}`,
-        office: matchingTransaction.office
+        office: savedUserTransaction.office
       });
 
       // 4. Llamar a acceptDeposit con el payload requerido
