@@ -543,8 +543,8 @@ export class IpnService implements OnModuleInit {
       if (matchingExternalDeposit) {
         console.log(`[IPN] ${savedMpTransaction.id}: ¡Coincidencia encontrada con depósito externo ID: ${matchingExternalDeposit.id}`);
 
-        // 1. Actualizar la transacción MP a "Match"
-        await this.updateTransactionStatus(savedMpTransaction.id.toString(), 'Match');
+        // 1. La transacción MP queda en "Pending"
+        // await this.updateTransactionStatus(savedMpTransaction.id.toString(), 'Match'); // Comentamos esta línea
 
         // 2. Cambiar el depósito externo a "Aceptado"
         await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Aceptado');
@@ -762,8 +762,8 @@ export class IpnService implements OnModuleInit {
     if (matchingTransaction) {
       console.log(`[${opId}] ¡Coincidencia encontrada con transacción MP ID: ${matchingTransaction.id}`);
 
-      // 1. Actualizar la transacción MP a "Match" en lugar de "Aceptado"
-      await this.updateTransactionStatus(matchingTransaction.id.toString(), 'Match');
+      // 1. La transacción MP queda en "Pending"
+      // await this.updateTransactionStatus(matchingTransaction.id.toString(), 'Match'); // Comentamos esta línea
 
       // 2. Cambiar el depósito externo a "Aceptado"
       await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Aceptado');
