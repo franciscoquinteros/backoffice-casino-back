@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Module } from '@nestjs/common';
 import { TypeOrmModuleOptions, TypeOrmOptionsFactory } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { User } from 'src/users/entities/user.entity';
@@ -12,6 +12,7 @@ import { ApiKey } from 'src/auth/apikeys/entities/apikey.entity';
 import { TicketAssignment } from 'src/ticketing/entities/ticket-assignment.entity';
 import { Office } from 'src/office/entities/office.entity';
 import { TransactionEntity } from 'src/transactions/entities/transaction.entity';
+import { RefreshToken } from 'src/auth/entities/refresh-token.entity';
 
 @Injectable()
 export class TypeOrmConfigService implements TypeOrmOptionsFactory {
@@ -30,7 +31,10 @@ export class TypeOrmConfigService implements TypeOrmOptionsFactory {
       TicketAssignment,
       Office,
       TransactionEntity,
+      RefreshToken,
     ];
+
+    const isProduction = this.configService.get('NODE_ENV') === 'production';
 
     return {
       type: 'postgres',
@@ -41,7 +45,27 @@ export class TypeOrmConfigService implements TypeOrmOptionsFactory {
       database: this.configService.get('DB_DATABASE'),
       entities: entities,
       synchronize: false,
-      logging: false,
+      maxQueryExecutionTime: 1000,
+      logging: isProduction ? ['error', 'warn', 'schema'] : ['query', 'error', 'warn', 'schema', 'info', 'log'],
+      extra: {
+        max: 10,
+        min: 2,
+        idleTimeoutMillis: 10000,
+        connectionTimeoutMillis: 3000,
+        statement_timeout: 10000,
+        keepalive: true,
+        keepaliveInitialDelay: 10000,
+      },
+      ssl: isProduction ? {
+        rejectUnauthorized: false,
+      } : false,
+      logger: 'advanced-console',
     };
   }
 }
+
+@Module({
+  providers: [TypeOrmConfigService],
+  exports: [TypeOrmConfigService]
+})
+export class TypeOrmConfigModule { }

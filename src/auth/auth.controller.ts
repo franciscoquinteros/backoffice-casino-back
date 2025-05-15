@@ -6,6 +6,8 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 // --- Quita ApiExcludeController si quieres documentar el login ---
 // import { ApiExcludeController } from '@nestjs/swagger';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger'; // Para documentar
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 // @ApiExcludeController()
 @ApiTags('Authentication') // Mejor documentarlo
@@ -40,5 +42,33 @@ export class AuthController {
             }
             throw error; // Re-lanza para que NestJS devuelva el status correcto
         }
+    }
+
+    @Post('refresh')
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({ summary: 'Obtener un nuevo access token usando un refresh token' })
+    @ApiResponse({ status: 200, description: 'Token actualizado correctamente' })
+    @ApiResponse({ status: 401, description: 'Refresh token inválido o expirado' })
+    async refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
+        this.logger.debug('Intento de refresh token');
+        try {
+            const result = await this.authService.refreshAccessToken(refreshTokenDto.refreshToken);
+            this.logger.debug('Token refreshed successfully');
+            return result;
+        } catch (error) {
+            this.logger.warn(`Refresh token failed: ${error.message}`);
+            throw error;
+        }
+    }
+
+    @Post('logout')
+    @UseGuards(JwtAuthGuard)
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({ summary: 'Cerrar sesión y revocar refresh token' })
+    @ApiResponse({ status: 200, description: 'Sesión cerrada correctamente' })
+    async logout(@Body() refreshTokenDto: RefreshTokenDto) {
+        this.logger.debug('Logout attempt');
+        await this.authService.logout(refreshTokenDto.refreshToken);
+        return { message: 'Sesión cerrada correctamente' };
     }
 }

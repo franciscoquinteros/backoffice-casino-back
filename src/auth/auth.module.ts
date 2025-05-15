@@ -17,12 +17,14 @@ import { JwtStrategy } from '../auth/strategies/jwt.strategy'; // <-- 1. Importa
 import { OfficeService } from 'src/office/office.service';
 import { OfficeModule } from 'src/office/office.module';
 import { RolesGuard } from './guards/roles.guard';
+import { RefreshToken } from './entities/refresh-token.entity';
+import { RefreshTokenService } from './refresh-token.service';
 
 @Module({
   imports: [
     UserModule,
     ConfigModule,
-    TypeOrmModule.forFeature([ApiKey]),
+    TypeOrmModule.forFeature([ApiKey, RefreshToken]),
     ApiKeysModule,
     OfficeModule,
     // --- CONFIGURACIÓN JWT ---
@@ -32,7 +34,7 @@ import { RolesGuard } from './guards/roles.guard';
       useFactory: async (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET'),
         signOptions: {
-          expiresIn: configService.get<string>('JWT_EXPIRATION', '3600s'),
+          expiresIn: configService.get<string>('JWT_EXPIRATION', '86400s'), // 24 horas
         },
       }),
       inject: [ConfigService],
@@ -47,10 +49,11 @@ import { RolesGuard } from './guards/roles.guard';
     ApiKeyService,
     JwtAuthGuard,
     JwtStrategy,  // <--- 2. Añade la Estrategia a los providers
-    RolesGuard
+    RolesGuard,
+    RefreshTokenService,
   ],
   controllers: [AuthController, ApiKeyController],
   // Exporta lo necesario
-  exports: [AuthService, ApiKeyGuard, ApiKeyService, JwtAuthGuard, PassportModule, JwtModule],
+  exports: [AuthService, ApiKeyGuard, ApiKeyService, JwtAuthGuard, PassportModule, JwtModule, RefreshTokenService],
 })
 export class AuthModule { }

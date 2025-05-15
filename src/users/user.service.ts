@@ -37,6 +37,11 @@ export class UserService {
         return this.userRepository.findOne({ where: { email } });
     }
 
+    // Método para buscar un usuario por su ID (string para soportar UUID y números convertidos a string)
+    async findById(id: string): Promise<User | null> {
+        return this.userRepository.findOne({ where: { id: parseInt(id) } });
+    }
+
     // findOne también debe devolver 'office'
     async findOne(id: number): Promise<User | null> { // Devuelve null si no se encuentra
         return this.userRepository.findOne({ where: { id } });
