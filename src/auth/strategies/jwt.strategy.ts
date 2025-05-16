@@ -41,13 +41,28 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     async validate(payload: JwtPayload): Promise<AuthenticatedUserPayload> {
-        this.logger.debug(`Validating JWT payload for user ID: ${payload.sub}`, payload); // Loguear el payload recibido
+        console.log('==== JWT VALIDATION DEBUG ====');
+        console.log('1. JWT token validation triggered');
+        console.log('2. Raw payload received:', payload);
+        this.logger.debug(`Validating JWT payload for user ID: ${payload.sub}`, payload);
 
         // 3. Cambia la validación para buscar 'officeId'
         if (!payload.sub || !payload.email || !payload.officeId) { // <-- CAMBIADO a officeId
-            this.logger.warn('JWT validation failed: Payload missing required fields (sub, email, officeId).', payload); // <-- Mensaje de log actualizado
+            console.log('3a. ERROR: Payload missing required fields');
+            console.log('   - sub present:', !!payload.sub);
+            console.log('   - email present:', !!payload.email);
+            console.log('   - officeId present:', !!payload.officeId);
+
+            this.logger.warn('JWT validation failed: Payload missing required fields (sub, email, officeId).', payload);
             throw new UnauthorizedException('Invalid token payload (missing required fields).');
         }
+
+        console.log('3b. All required payload fields present');
+        console.log('4. Creating user payload with:');
+        console.log('   - id:', payload.sub);
+        console.log('   - email:', payload.email);
+        console.log('   - role:', payload.role);
+        console.log('   - office (from officeId):', payload.officeId);
 
         // Opcional: Validaciones extra (usuario existe/activo)
 
@@ -59,6 +74,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             office: payload.officeId, // <-- Mapea payload.officeId a request.user.office
         };
 
+        console.log('5. User payload created successfully:', userPayload);
         this.logger.debug(`JWT validation successful. Returning user payload for request.user:`, userPayload);
         return userPayload;
     }

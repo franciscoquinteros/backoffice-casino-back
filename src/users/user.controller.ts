@@ -171,23 +171,60 @@ export class UserController {
   @Delete(':id')
   @Roles('admin', 'superadmin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete a user (restricted by office)' })
+  @ApiOperation({ summary: 'Delete a user (restricted by office, except for superadmin)' })
   // ... ApiResponses ...
   async remove(
     @Param('id', ParseIntPipe) id: number,
     @Req() request: RequestWithUser
   ): Promise<void> {
+    console.log('==== DELETE USER DEBUG ====');
+    console.log('1. Delete user request received for ID:', id);
+    console.log('2. Request headers:', request.headers);
+
     const requestingUser = request.user;
-    if (!requestingUser?.office) { throw new ForbiddenException("User office missing."); }
+    console.log('3. Requesting user object:', requestingUser);
 
-    const targetUser = await this.userService.findOne(id);
-    if (!targetUser) { throw new NotFoundException(`User with ID ${id} not found`); }
-
-    // Autorización
-    if (targetUser.office !== requestingUser.office /* && requestingUser.role !== 'superadmin' */) {
-      throw new ForbiddenException("Cannot delete users from other offices.");
+    if (!requestingUser?.office) {
+      console.log('4a. ERROR: User office missing');
+      throw new ForbiddenException("User office missing.");
     }
 
-    await this.userService.remove(id);
+    console.log('4b. Requesting user has office:', requestingUser.office);
+    console.log('5. Requesting user role:', requestingUser.role);
+
+    try {
+      const targetUser = await this.userService.findOne(id);
+      console.log('6. Target user found:', targetUser);
+
+      if (!targetUser) {
+        console.log('7a. ERROR: Target user not found');
+        throw new NotFoundException(`User with ID ${id} not found`);
+      }
+
+      console.log('7b. Target user exists');
+      console.log('8. Requesting user role:', requestingUser.role, 'Target user office:', targetUser.office);
+
+      // If user is superadmin, allow deletion of any user
+      if (requestingUser.role === 'superadmin') {
+        console.log('9a. User is superadmin, allowing deletion of any user');
+        await this.userService.remove(id);
+        console.log('10. User successfully deleted');
+        return;
+      }
+
+      console.log('9b. User is not superadmin, checking office restriction');
+      // For non-superadmin users, check office restriction
+      if (targetUser.office !== requestingUser.office) {
+        console.log('11a. ERROR: Cannot delete users from other offices');
+        throw new ForbiddenException("Cannot delete users from other offices.");
+      }
+
+      console.log('11b. Offices match, allowing deletion');
+      await this.userService.remove(id);
+      console.log('12. User successfully deleted');
+    } catch (error) {
+      console.log('ERROR during user deletion:', error);
+      throw error;
+    }
   }
 }
