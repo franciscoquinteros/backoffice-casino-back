@@ -71,4 +71,7 @@ export class TransactionEntity {
 
     @Column({ nullable: true })
     office: string;
+
+    @Column({ name: 'account_name', nullable: true })
+    accountName: string;
 }

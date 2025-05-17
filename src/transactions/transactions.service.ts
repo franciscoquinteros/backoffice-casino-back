@@ -187,6 +187,9 @@ export class IpnService implements OnModuleInit {
 
         this.transactions = dbTransactions.map(entity => this.mapEntityToTransaction(entity));
         console.log(`Cargadas ${this.transactions.length} transacciones desde la base de datos`);
+
+        // Actualizar automáticamente los nombres de cuentas de transacciones pendientes
+        this.updateAllAccountNames();
       } catch (error) {
         console.error('Error al cargar transacciones desde la base de datos:', error);
         this.transactions = [];
@@ -196,9 +199,76 @@ export class IpnService implements OnModuleInit {
     }
   }
 
+  // Método para actualizar automáticamente los nombres de cuentas para todas las transacciones
+  private async updateAllAccountNames(): Promise<void> {
+    try {
+      console.log('Iniciando proceso de actualización automática de nombres de cuentas...');
+
+      // Obtener todas las transacciones pendientes que tengan CBU pero no tengan nombre de cuenta
+      const transactionsToUpdate = await this.transactionRepository.find({
+        where: [
+          { accountName: null },
+          { accountName: '' },
+          { accountName: 'No disponible' }
+        ]
+      });
+
+      console.log(`Encontradas ${transactionsToUpdate.length} transacciones sin nombre de cuenta asignado`);
+
+      // Crear un mapa para optimizar búsquedas de cuentas (CBU -> nombre)
+      const accountNameMap = new Map<string, string>();
+
+      // Llenar el mapa inicialmente con las cuentas en memoria
+      for (const account of this.accounts) {
+        if (account.cbu && account.name) {
+          accountNameMap.set(account.cbu, account.name);
+        }
+      }
+
+      // Procesar cada transacción
+      for (const transaction of transactionsToUpdate) {
+        if (!transaction.cbu) continue;
+
+        try {
+          let accountName: string | null = null;
+
+          // Primero buscar en el mapa para evitar consultas repetidas a la BD
+          if (accountNameMap.has(transaction.cbu)) {
+            accountName = accountNameMap.get(transaction.cbu);
+            console.log(`Usando nombre en caché para CBU ${transaction.cbu}: ${accountName}`);
+          } else {
+            // Si no está en el mapa, buscar en la BD
+            const account = await this.accountService.findByCbu(transaction.cbu);
+            if (account && account.name) {
+              accountName = account.name;
+              // Agregar al mapa para futuras consultas
+              accountNameMap.set(transaction.cbu, account.name);
+              console.log(`Encontrado en BD nombre para CBU ${transaction.cbu}: ${accountName}`);
+            } else {
+              console.log(`No se encontró cuenta para CBU ${transaction.cbu}`);
+            }
+          }
+
+          // Si encontramos un nombre, actualizar la transacción
+          if (accountName) {
+            transaction.accountName = accountName;
+            await this.transactionRepository.save(transaction);
+            console.log(`Actualizada transacción ${transaction.id} con nombre de cuenta: ${accountName}`);
+          }
+        } catch (error) {
+          console.error(`Error procesando transacción ${transaction.id}:`, error);
+        }
+      }
+
+      console.log('Proceso de actualización automática de nombres de cuentas completado');
+    } catch (error) {
+      console.error('Error en el proceso de actualización automática de nombres de cuentas:', error);
+    }
+  }
+
   // Mapear entidad a tipo Transaction
   private mapEntityToTransaction(entity: TransactionEntity): Transaction {
-    return {
+    const mappedTransaction = {
       id: entity.id,
       type: entity.type,
       amount: typeof entity.amount === 'number'
@@ -218,8 +288,14 @@ export class IpnService implements OnModuleInit {
       idCliente: entity.idCliente,
       reference_transaction: entity.referenceTransaction,
       relatedUserTransactionId: entity.relatedUserTransactionId,
-      office: entity.office, // <-- Mapear el campo 'office'
+      office: entity.office,
+      account_name: entity.accountName,
     };
+
+    // Verificar el mapeo
+    console.log(`[MAP_ENTITY] Entidad → Transacción: accountName=${entity.accountName} → account_name=${mappedTransaction.account_name}`);
+
+    return mappedTransaction;
   }
 
   // Mapear Transaction a entidad
@@ -242,7 +318,13 @@ export class IpnService implements OnModuleInit {
     entity.idCliente = transaction.idCliente?.toString() || null;
     entity.referenceTransaction = transaction.reference_transaction;
     entity.relatedUserTransactionId = transaction.relatedUserTransactionId;
-    entity.office = transaction.office || null; // <-- Mapear y guardar 'office'
+    entity.office = transaction.office || null;
+
+    // CRÍTICO: Asegurarse de asignar account_name a accountName (la columna de BD)
+    entity.accountName = transaction.account_name || null;
+
+    console.log(`[MAP_TO_ENTITY] Mapeando transaction.account_name=${transaction.account_name} a entity.accountName=${entity.accountName}`);
+
     return entity;
   }
 
@@ -250,9 +332,55 @@ export class IpnService implements OnModuleInit {
   // En IpnService (transactions.service.ts)
   async saveTransaction(transaction: Transaction): Promise<Transaction> {
     try {
+      // Si la transacción tiene CBU pero no tiene account_name, intentamos buscar el nombre
+      if (transaction.cbu && !transaction.account_name) {
+        // Buscar en memoria primero
+        const accountByCbu = this.accounts.find(acc =>
+          acc.cbu === transaction.cbu &&
+          acc.status === 'active' &&
+          acc.wallet === 'mercadopago'
+        );
+
+        if (accountByCbu && accountByCbu.name) {
+          console.log(`[SAVE_TX] Encontró cuenta en memoria: ${accountByCbu.name} para CBU ${transaction.cbu}`);
+          transaction.account_name = accountByCbu.name;
+        } else {
+          console.log(`[SAVE_TX] Buscando cuenta directamente en BD para CBU ${transaction.cbu}`);
+          try {
+            // Buscar directamente en la BD usando el servicio de cuentas
+            const dbAccount = await this.accountService.findByCbu(transaction.cbu);
+            if (dbAccount) {
+              console.log(`[SAVE_TX] Encontró cuenta en BD: ${dbAccount.name} para CBU ${transaction.cbu}`);
+              transaction.account_name = dbAccount.name;
+            } else {
+              console.log(`[SAVE_TX] No se encontró cuenta para CBU ${transaction.cbu}, usando valor por defecto`);
+              transaction.account_name = 'No disponible';
+            }
+          } catch (error) {
+            console.error(`[SAVE_TX] Error al buscar cuenta en BD:`, error);
+            transaction.account_name = 'No disponible';
+          }
+        }
+      }
+
+      // Hacer un log detallado antes de guardar
+      console.log(`[SAVE_TX] Guardando transacción con datos:`, {
+        id: transaction.id,
+        cbu: transaction.cbu,
+        account_name: transaction.account_name
+      });
+
       const entity = this.mapTransactionToEntity(transaction);
+
+      // Log para ver los datos de la entidad antes de guardarla
+      console.log(`[SAVE_TX] Entidad a guardar:`, {
+        id: entity.id,
+        cbu: entity.cbu,
+        accountName: entity.accountName
+      });
+
       const savedEntity = await this.transactionRepository.save(entity);
-      console.log(`Transacción guardada en BD: ${savedEntity.id}`);
+      console.log(`[SAVE_TX] Transacción guardada en BD: ${savedEntity.id}, account_name: ${savedEntity.accountName || 'NO GUARDADO'}`);
 
       // Actualizar también en memoria si es necesario
       const existingIndex = this.transactions.findIndex(t => t.id === transaction.id);
@@ -264,7 +392,7 @@ export class IpnService implements OnModuleInit {
 
       return this.mapEntityToTransaction(savedEntity);
     } catch (error) {
-      console.error('Error al guardar transacción en BD:', error);
+      console.error('[SAVE_TX] Error al guardar transacción en BD:', error);
       return transaction;
     }
   }
@@ -452,7 +580,8 @@ export class IpnService implements OnModuleInit {
 
     // Buscar la cuenta asociada basada en el receiver_id
     const associatedAccount = this.findAccountByReceiverId(receiverId?.toString());
-    console.log(`[IPN] ${paymentId}: Cuenta asociada encontrada:`, associatedAccount);
+    console.log(`[IPN] ${paymentId}: Cuenta asociada encontrada:`, associatedAccount ?
+      { id: associatedAccount.id, name: associatedAccount.name, agent: associatedAccount.agent } : 'No encontrada');
 
     // Obtener la office de la cuenta asociada
     let officeFromAccount = null;
@@ -470,6 +599,37 @@ export class IpnService implements OnModuleInit {
       console.log(`[IPN] ${paymentId}: CBU del depósito encontrado: ${depositCbu}`);
     }
 
+    // Si tenemos CBU pero no tenemos la cuenta asociada por receiverId, intentamos buscarla por el CBU
+    let accountInfo = associatedAccount;
+    if (!accountInfo && depositCbu) {
+      console.log(`[IPN] ${paymentId}: Buscando cuenta por CBU: ${depositCbu}`);
+
+      // Buscar en memoria
+      accountInfo = this.findAccountByCbu(depositCbu);
+
+      // Si no está en memoria, buscar en la base de datos
+      if (!accountInfo) {
+        try {
+          console.log(`[IPN] ${paymentId}: Buscando cuenta en base de datos para CBU ${depositCbu}`);
+          const dbAccount = await this.accountService.findByCbu(depositCbu);
+          if (dbAccount) {
+            console.log(`[IPN] ${paymentId}: Encontrada cuenta en BD: ${dbAccount.name} para CBU ${depositCbu}`);
+            accountInfo = dbAccount;
+            // Agregar a las cuentas en memoria para futuras consultas
+            this.accounts.push(dbAccount);
+          }
+        } catch (error) {
+          console.error(`[IPN] ${paymentId}: Error buscando cuenta en BD:`, error);
+        }
+      }
+
+      // Si encontramos la cuenta por CBU, usamos su office
+      if (accountInfo && !officeFromAccount) {
+        officeFromAccount = accountInfo.office || accountInfo.agent;
+        console.log(`[IPN] ${paymentId}: Office encontrada para CBU ${depositCbu}: ${officeFromAccount}`);
+      }
+    }
+
     const existingMpTx = await this.getTransactionById(apiData.id.toString());
     mpTransaction = existingMpTx ? existingMpTx : { id: apiData.id.toString(), type: 'deposit' } as Transaction;
 
@@ -484,7 +644,8 @@ export class IpnService implements OnModuleInit {
     mpTransaction.external_reference = apiData.external_reference || null;
     mpTransaction.receiver_id = receiverId?.toString() || null;
     mpTransaction.cbu = depositCbu || associatedAccount?.cbu;
-    mpTransaction.office = officeFromAccount; // Asignar la office obtenida de la cuenta
+    mpTransaction.office = officeFromAccount;
+    mpTransaction.account_name = accountInfo?.name || 'No disponible';
 
     const savedMpTransaction = await this.saveTransaction(mpTransaction);
     console.log(`[IPN] DEPURACIÓN: Transacción MP guardada con los siguientes datos:`, {
@@ -494,6 +655,7 @@ export class IpnService implements OnModuleInit {
       email: savedMpTransaction.payer_email,
       cbu: savedMpTransaction.cbu,
       office: savedMpTransaction.office,
+      account_name: savedMpTransaction.account_name,
       description: savedMpTransaction.description
     });
 
@@ -616,6 +778,7 @@ export class IpnService implements OnModuleInit {
     console.log(`[${opId}] INICIO: Validando depósito:`, JSON.stringify(depositData));
     console.log(`[${opId}] Email recibido para depósito:`, depositData.email);
     console.log(`[${opId}] idAgent recibido:`, depositData.idAgent);
+    console.log(`[${opId}] CBU recibido:`, depositData.cbu);
 
     // Extraemos el idTransferencia del payload
     const idTransferencia = depositData.idTransaction || `deposit_${Date.now()}`;
@@ -624,6 +787,39 @@ export class IpnService implements OnModuleInit {
     if (this.accounts.length === 0) {
       console.warn(`[${opId}] No hay cuentas de Mercado Pago configuradas. Intentando recargar...`);
       await this.reloadService();
+    }
+
+    // Intentar encontrar la cuenta asociada al CBU directamente de la base de datos
+    let accountInfo = null;
+    try {
+      console.log(`[${opId}] Buscando cuenta directamente en BD para CBU ${depositData.cbu}`);
+      accountInfo = await this.accountService.findByCbu(depositData.cbu, depositData.idAgent);
+
+      if (accountInfo) {
+        console.log(`[${opId}] ENCONTRÓ CUENTA EN BD: ${accountInfo.name} (ID: ${accountInfo.id}) para CBU ${depositData.cbu}`);
+      } else {
+        // Si no encuentra con filtro de oficina, intenta sin él
+        accountInfo = await this.accountService.findByCbu(depositData.cbu);
+        if (accountInfo) {
+          console.log(`[${opId}] ENCONTRÓ CUENTA EN BD SIN FILTRO OFICINA: ${accountInfo.name} (ID: ${accountInfo.id}) para CBU ${depositData.cbu}`);
+        } else {
+          console.warn(`[${opId}] NO SE ENCONTRÓ cuenta en BD para CBU ${depositData.cbu}`);
+        }
+      }
+    } catch (error) {
+      console.error(`[${opId}] Error al buscar cuenta por CBU ${depositData.cbu}:`, error);
+    }
+
+    // Mostrar resultado de la búsqueda
+    if (accountInfo) {
+      console.log(`[${opId}] CUENTA ENCONTRADA PARA CBU ${depositData.cbu}:`, {
+        id: accountInfo.id,
+        name: accountInfo.name,
+        agent: accountInfo.agent,
+        office: accountInfo.office
+      });
+    } else {
+      console.warn(`[${opId}] No se encontró cuenta configurada para CBU ${depositData.cbu} en oficina ${depositData.idAgent}`);
     }
 
     // Validación de CBU con filtro de oficina
@@ -644,6 +840,9 @@ export class IpnService implements OnModuleInit {
             'Error al registrar depósito: ID de transacción duplicado con estado de error.';
         return { status: responseStatus, message: responseMessage, transaction: existingUserReport };
       } else {
+        const account_name = accountInfo?.name || 'CBU no reconocido';
+        console.log(`[${opId}] Creando transacción rechazada con account_name: ${account_name}`);
+
         const rejectedTransaction: Transaction = {
           id: idTransferencia,
           type: 'deposit',
@@ -656,6 +855,7 @@ export class IpnService implements OnModuleInit {
           payer_email: depositData.email,
           external_reference: depositData.idTransaction,
           office: officeAccount?.office,
+          account_name: account_name
         };
         await this.saveTransaction(rejectedTransaction);
         return { status: 'error', message: 'El CBU proporcionado no es válido o no está configurado para esta oficina.', transaction: rejectedTransaction };
@@ -664,6 +864,12 @@ export class IpnService implements OnModuleInit {
 
     // Crear o actualizar la transacción del usuario
     const existingPendingOrAcceptedUserReport = await this.getTransactionById(depositData.idTransaction || '');
+
+    // Establecer el nombre de cuenta para la transacción
+    const account_name = accountInfo?.name || depositData.nombreDelTitular || 'No disponible';
+    console.log(`[${opId}] Usando account_name: ${account_name} para la transacción`);
+
+    // Crear la transacción con el nombre de cuenta ya establecido
     const userDepositTransaction: Transaction = existingPendingOrAcceptedUserReport ? existingPendingOrAcceptedUserReport : {
       id: depositData.idTransaction || `deposit_${Date.now()}`,
       type: 'deposit',
@@ -676,6 +882,7 @@ export class IpnService implements OnModuleInit {
       payer_email: depositData.email,
       external_reference: depositData.nombreDelTitular,
       office: depositData.idAgent,
+      account_name: account_name // Asignar el nombre de cuenta
     };
 
     if (existingPendingOrAcceptedUserReport?.status === 'Aceptado') {
@@ -685,7 +892,14 @@ export class IpnService implements OnModuleInit {
       userDepositTransaction.status = 'Pending';
     }
 
-    console.log(`[${opId}] Creando/Actualizando transacción de usuario con estado: ${userDepositTransaction.status} (ID: ${userDepositTransaction.id}) en oficina: ${userDepositTransaction.office}`);
+    console.log(`[${opId}] Creando/Actualizando transacción de usuario:`, {
+      id: userDepositTransaction.id,
+      cbu: userDepositTransaction.cbu,
+      account_name: userDepositTransaction.account_name,
+      office: userDepositTransaction.office
+    });
+
+    // Guardar la transacción en la base de datos
     const savedUserTransaction = await this.saveTransaction(userDepositTransaction);
 
     // Si la transacción ya está Aceptada, no buscar match
@@ -889,33 +1103,174 @@ export class IpnService implements OnModuleInit {
   async getTransactions(officeId?: string, type?: string, status?: string): Promise<Transaction[]> {
     console.log(`IpnService: Buscando transacciones${officeId ? ` para oficina ${officeId}` : ''}${type ? ` de tipo ${type}` : ''}${status ? ` con estado ${status}` : ''}`);
 
-    // Construir las opciones de búsqueda
-    const findOptions: FindManyOptions<TransactionEntity> = {
-      order: { dateCreated: 'DESC' }, // Ordenar por fecha descendente
-      where: {} // Inicializar el objeto where
-    };
+    try {
+      // Usamos createQueryBuilder para hacer un join con la tabla account
+      const queryBuilder = this.transactionRepository.createQueryBuilder('transaction')
+        .leftJoin('account', 'account', 'transaction.cbu = account.cbu')
+        .select([
+          'transaction.id',
+          'transaction.type',
+          'transaction.amount',
+          'transaction.status',
+          'transaction.dateCreated',
+          'transaction.description',
+          'transaction.paymentMethodId',
+          'transaction.payerId',
+          'transaction.payerEmail',
+          'transaction.payerIdentification',
+          'transaction.externalReference',
+          'transaction.cbu',
+          'transaction.walletAddress',
+          'transaction.receiverId',
+          'transaction.idCliente',
+          'transaction.referenceTransaction',
+          'transaction.relatedUserTransactionId',
+          'transaction.office',
+          'transaction.accountName'
+        ])
+        .addSelect('account.name', 'account_name');
 
-    // Añadir filtros si se proporcionan
-    if (officeId) {
-      findOptions.where['office'] = officeId;
+      // Añadir filtros si se proporcionan
+      if (officeId) {
+        queryBuilder.andWhere('transaction.office = :officeId', { officeId });
+      }
+      if (type) {
+        queryBuilder.andWhere('transaction.type = :type', { type });
+      }
+      if (status) {
+        queryBuilder.andWhere('transaction.status = :status', { status });
+      }
+
+      queryBuilder.orderBy('transaction.dateCreated', 'DESC');
+
+      // Ejecutar la consulta raw y obtener los resultados
+      const rawResults = await queryBuilder.getRawMany();
+
+      console.log(`IpnService: Obtenidas ${rawResults.length} transacciones con join a accounts`);
+
+      // Log para depuración - ver los primeros resultados
+      if (rawResults.length > 0) {
+        console.log('Muestra de resultados JOIN:', rawResults.slice(0, 2).map(r => ({
+          id: r.transaction_id,
+          cbu: r.transaction_cbu,
+          account_name: r.account_name
+        })));
+      }
+
+      // Mapear los resultados raw a objetos Transaction
+      const transactions = rawResults.map(raw => {
+        const transaction: Transaction = {
+          id: raw.transaction_id,
+          type: raw.transaction_type,
+          amount: typeof raw.transaction_amount === 'number'
+            ? raw.transaction_amount
+            : parseFloat(String(raw.transaction_amount)),
+          status: raw.transaction_status,
+          date_created: raw.transaction_dateCreated ? new Date(raw.transaction_dateCreated).toISOString() : null,
+          description: raw.transaction_description,
+          payment_method_id: raw.transaction_paymentMethodId,
+          payer_id: raw.transaction_payerId,
+          payer_email: raw.transaction_payerEmail,
+          external_reference: raw.transaction_externalReference,
+          cbu: raw.transaction_cbu,
+          wallet_address: raw.transaction_walletAddress,
+          receiver_id: raw.transaction_receiverId,
+          idCliente: raw.transaction_idCliente,
+          reference_transaction: raw.transaction_referenceTransaction,
+          relatedUserTransactionId: raw.transaction_relatedUserTransactionId,
+          office: raw.transaction_office,
+          // Usar el nombre de cuenta del JOIN si está disponible, sino usar el guardado en accountName
+          account_name: raw.account_name || raw.transaction_accountName || 'No disponible'
+        };
+
+        return transaction;
+      });
+
+      return transactions;
+    } catch (error) {
+      console.error('Error al obtener transacciones con join a accounts:', error);
+
+      // Si falla el método con join, recurrimos al método original
+      console.log('Recurriendo al método original sin join...');
+
+      // Construir las opciones de búsqueda tradicionales
+      const findOptions: FindManyOptions<TransactionEntity> = {
+        order: { dateCreated: 'DESC' }, // Ordenar por fecha descendente
+        where: {} // Inicializar el objeto where
+      };
+
+      // Añadir filtros si se proporcionan
+      if (officeId) {
+        findOptions.where['office'] = officeId;
+      }
+      if (type) {
+        findOptions.where['type'] = type;
+      }
+      if (status) {
+        findOptions.where['status'] = status;
+      }
+
+      // Ejecutar la consulta y obtener los resultados
+      const entities = await this.transactionRepository.find(findOptions);
+
+      // Mapear las entidades obtenidas al tipo Transaction
+      const transactions = entities.map(entity => {
+        const transaction = this.mapEntityToTransaction(entity);
+
+        // Si la transacción tiene CBU pero no tiene account_name, buscar el nombre
+        if (transaction.cbu && !transaction.account_name) {
+          // En segundo plano (no esperamos la respuesta), actualizar el account_name
+          this.findAccountNameForTransaction(transaction.id, transaction.cbu).catch(err => {
+            console.error(`Error al buscar nombre de cuenta para transacción ${transaction.id}:`, err);
+          });
+        }
+
+        return transaction;
+      });
+
+      console.log(`IpnService: Obtenidas ${transactions.length} transacciones${officeId ? ` para oficina ${officeId}` : ''}${type ? ` de tipo ${type}` : ''}${status ? ` con estado ${status}` : ''}`);
+      return transactions;
     }
-    if (type) {
-      findOptions.where['type'] = type;
-    }
-    if (status) {
-      findOptions.where['status'] = status;
-    }
-
-    // Ejecutar la consulta y obtener los resultados
-    const entities = await this.transactionRepository.find(findOptions);
-
-    // Mapear las entidades obtenidas al tipo Transaction
-    const transactions = entities.map(entity => this.mapEntityToTransaction(entity));
-
-    console.log(`IpnService: Obtenidas ${transactions.length} transacciones${officeId ? ` para oficina ${officeId}` : ''}${type ? ` de tipo ${type}` : ''}${status ? ` con estado ${status}` : ''}`);
-    return transactions;
   }
 
+  // Método auxiliar para buscar y actualizar el nombre de cuenta de una transacción en segundo plano
+  private async findAccountNameForTransaction(transactionId: string | number, cbu: string): Promise<void> {
+    try {
+      if (!cbu) return;
+
+      console.log(`Buscando nombre de cuenta para transacción ${transactionId} con CBU ${cbu}`);
+
+      // Buscar la cuenta por CBU en la base de datos
+      const account = await this.accountService.findByCbu(cbu);
+
+      if (account && account.name) {
+        console.log(`Encontrado nombre de cuenta "${account.name}" para transacción ${transactionId}`);
+
+        // Actualizar en la base de datos directamente usando update
+        try {
+          await this.transactionRepository.update(
+            { id: transactionId.toString() },
+            { accountName: account.name }
+          );
+
+          console.log(`Actualizado accountName en BD para transacción ${transactionId} a "${account.name}"`);
+
+          // También actualizamos en memoria
+          const updatedTransaction = this.transactions.find(t => t.id.toString() === transactionId.toString());
+          if (updatedTransaction) {
+            updatedTransaction.account_name = account.name;
+            console.log(`Actualizado account_name en memoria para transacción ${transactionId}`);
+          }
+        } catch (dbError) {
+          console.error(`Error al actualizar accountName en BD para transacción ${transactionId}:`, dbError);
+        }
+      } else {
+        console.log(`No se encontró cuenta para CBU ${cbu} de transacción ${transactionId}`);
+      }
+    } catch (error) {
+      console.error(`Error al buscar nombre de cuenta para transacción ${transactionId}:`, error);
+    }
+  }
 
   // Actualizar transacción (por ejemplo, al aceptar una transacción)
   async updateTransactionStatus(id: string, status: string): Promise<Transaction | null> {
@@ -1066,5 +1421,56 @@ export class IpnService implements OnModuleInit {
     if (!cuit || cuit.length < 11) return null;
     // CUIT/CUIL: XX-XXXXXXXX-X
     return cuit.substring(2, 10); // 8 dígitos del medio
+  }
+
+  // Buscar o definir un método para encontrar una cuenta por CBU
+  private findAccountByCbu(cbu: string, officeId?: string): Account | undefined {
+    if (!cbu) {
+      console.warn("findAccountByCbu fue llamada con un CBU null o undefined.");
+      return undefined;
+    }
+
+    console.log(`Buscando cuenta configurada para CBU: ${cbu}${officeId ? ` en oficina ${officeId}` : ''}`);
+
+    // Primero buscar en las cuentas cargadas en memoria
+    const accountInMemory = this.accounts.find(acc =>
+      acc.cbu === cbu &&
+      acc.wallet === 'mercadopago' &&
+      acc.status === 'active' &&
+      (!officeId || acc.agent === officeId)
+    );
+
+    if (accountInMemory) {
+      console.log(`Cuenta encontrada en memoria para CBU ${cbu}: ${accountInMemory.name} (ID: ${accountInMemory.id})`);
+      return accountInMemory;
+    }
+
+    // Si no se encuentra en memoria, intentamos recargar las cuentas primero
+    console.log(`No se encontró cuenta para CBU ${cbu} en memoria, recargando cuentas...`);
+    try {
+      // Recargar cuentas (esto actualiza this.accounts)
+      this.reloadService().then(() => {
+        const accountAfterReload = this.accounts.find(acc =>
+          acc.cbu === cbu &&
+          acc.wallet === 'mercadopago' &&
+          acc.status === 'active' &&
+          (!officeId || acc.agent === officeId)
+        );
+
+        if (accountAfterReload) {
+          console.log(`Cuenta encontrada después de recargar para CBU ${cbu}: ${accountAfterReload.name}`);
+          return accountAfterReload;
+        } else {
+          console.log(`Después de recargar, sigue sin encontrarse cuenta para CBU: ${cbu}`);
+        }
+      }).catch(error => {
+        console.error(`Error al recargar cuentas en findAccountByCbu: ${error.message}`);
+      });
+    } catch (error) {
+      console.error(`Error al buscar cuenta por CBU ${cbu}: ${error}`);
+    }
+
+    console.log(`No se encontró cuenta para CBU: ${cbu} después de intentar recargar`);
+    return undefined;
   }
 }
