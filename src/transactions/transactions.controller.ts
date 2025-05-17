@@ -97,6 +97,12 @@ export class TransactionsController {
     // Usamos el ID validado de la ruta para filtrar
     const transactions = await this.ipnService.getTransactions(officeIdFromPath);
     console.log(`Transacciones devueltas (filtradas por oficina ${officeIdFromPath} desde path):`, transactions.length);
+
+    if (transactions.length > 0) {
+      console.log('Propiedades disponibles:', Object.keys(transactions[0]));
+      console.log('Valor de external_reference:', transactions[0].external_reference || null);
+    }
+
     return transactions;
   }
 

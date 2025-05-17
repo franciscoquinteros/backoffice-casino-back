@@ -275,7 +275,10 @@ export class IpnService implements OnModuleInit {
         ? entity.amount
         : parseFloat(String(entity.amount)),
       status: entity.status,
-      date_created: entity.dateCreated?.toISOString(),
+      date_created: entity.dateCreated?.toISOString() ||
+        entity.createdAt?.toISOString() ||
+        entity.updatedAt?.toISOString() ||
+        null,
       description: entity.description,
       payment_method_id: entity.paymentMethodId,
       payer_id: entity.payerId,
@@ -1163,6 +1166,8 @@ export class IpnService implements OnModuleInit {
           'transaction.amount',
           'transaction.status',
           'transaction.dateCreated',
+          'transaction.createdAt',
+          'transaction.updatedAt',
           'transaction.description',
           'transaction.paymentMethodId',
           'transaction.payerId',
@@ -1193,6 +1198,12 @@ export class IpnService implements OnModuleInit {
 
       queryBuilder.orderBy('transaction.dateCreated', 'DESC');
 
+      // Añadir selección explícita para date_created
+      queryBuilder.addSelect('transaction.dateCreated', 'transaction_date_created');
+      // Intentar varias formas de seleccionar date_created con diferentes alias
+      queryBuilder.addSelect('transaction.date_created', 'date_created');
+      queryBuilder.addSelect('transaction.dateCreated', 'dateCreated');
+
       // Ejecutar la consulta raw y obtener los resultados
       const rawResults = await queryBuilder.getRawMany();
 
@@ -1205,6 +1216,23 @@ export class IpnService implements OnModuleInit {
           cbu: r.transaction_cbu,
           account_name: r.account_name
         })));
+
+        // Log completo del primer resultado para ver TODOS los campos
+        console.log('OBJETO RAW COMPLETO PRIMERA TRANSACCIÓN:', rawResults[0]);
+
+        // Agregar log detallado para ver la estructura completa
+        console.log('Nombres de propiedades disponibles:', Object.keys(rawResults[0]));
+
+        // Agregar logs específicos para date_created
+        console.log('Valor raw de transaction_dateCreated:', rawResults[0].transaction_dateCreated);
+        console.log('Valor de transaction_date_created:', rawResults[0].transaction_date_created);
+
+        console.log('Valor de external_reference:',
+          rawResults[0].transaction_externalReference ||
+          rawResults[0].transaction_external_reference);
+        console.log('Valor de id_cliente:',
+          rawResults[0].transaction_idCliente ||
+          rawResults[0].transaction_id_cliente);
       }
 
       // Mapear los resultados raw a objetos Transaction
@@ -1216,16 +1244,24 @@ export class IpnService implements OnModuleInit {
             ? raw.transaction_amount
             : parseFloat(String(raw.transaction_amount)),
           status: raw.transaction_status,
-          date_created: raw.transaction_dateCreated ? new Date(raw.transaction_dateCreated).toISOString() : null,
+          date_created:
+            // Intentar diferentes posibles nombres de campos
+            raw.transaction_dateCreated ? new Date(raw.transaction_dateCreated).toISOString() :
+              raw.transaction_date_created ? new Date(raw.transaction_date_created).toISOString() :
+                raw.date_created ? new Date(raw.date_created).toISOString() :
+                  raw.dateCreated ? new Date(raw.dateCreated).toISOString() :
+                    raw.transaction_createdAt ? new Date(raw.transaction_createdAt).toISOString() :
+                      raw.transaction_created_at ? new Date(raw.transaction_created_at).toISOString() :
+                        null, // Devolver null en lugar de fecha actual
           description: raw.transaction_description,
           payment_method_id: raw.transaction_paymentMethodId,
           payer_id: raw.transaction_payerId,
           payer_email: raw.transaction_payerEmail,
-          external_reference: raw.transaction_externalReference,
+          external_reference: raw.transaction_externalReference || raw.transaction_external_reference || null,
           cbu: raw.transaction_cbu,
           wallet_address: raw.transaction_walletAddress,
           receiver_id: raw.transaction_receiverId,
-          idCliente: raw.transaction_idCliente,
+          idCliente: raw.transaction_idCliente || raw.transaction_id_cliente || null,
           reference_transaction: raw.transaction_referenceTransaction,
           relatedUserTransactionId: raw.transaction_relatedUserTransactionId,
           office: raw.transaction_office,
