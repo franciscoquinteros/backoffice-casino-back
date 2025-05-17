@@ -11,6 +11,7 @@ interface JwtPayload {
     email: string;
     role: string;
     officeId: string; // <-- CAMBIADO: Debe coincidir con lo que AuthService pone en el token
+    username?: string; // <-- AÑADIDO: Para incluir el username en el token
     // iat?: number;
     // exp?: number;
 }
@@ -22,6 +23,7 @@ interface AuthenticatedUserPayload {
     email: string;
     role: string;
     office: string; // <-- Mantenemos 'office' para request.user (más semántico)
+    username?: string; // <-- AÑADIDO: Para incluir el username en request.user
 }
 
 @Injectable()
@@ -72,6 +74,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             email: payload.email,
             role: payload.role,
             office: payload.officeId, // <-- Mapea payload.officeId a request.user.office
+            username: payload.username, // <-- AÑADIDO: Incluir el username si existe
         };
 
         console.log('5. User payload created successfully:', userPayload);

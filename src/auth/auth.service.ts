@@ -23,6 +23,7 @@ interface TokenPayload {
     email: string;
     role: string;
     officeId: string;
+    username?: string;
 }
 
 @Injectable()
@@ -116,6 +117,7 @@ export class AuthService {
             email: user.email,
             role: user.role,
             officeId: officeIdToUseInToken,
+            username: user.username,
         };
 
         // Creamos un accessToken con duración corta (30-60 minutos)
@@ -205,6 +207,7 @@ export class AuthService {
                 email: user.email,
                 role: user.role,
                 officeId: user.office,
+                username: user.username,
             };
 
             const accessToken = this.jwtService.sign(payload, { expiresIn: '60m' });

@@ -31,6 +31,9 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'; // <-- Importar tu
 interface AuthenticatedUser {
   id: string | number; // ID del usuario autenticado
   office: string;      // La oficina REAL a la que pertenece el usuario (del token/BD)
+  email?: string;      // Email del usuario (opcional)
+  username?: string;   // Nombre de usuario (opcional)
+  role?: string;       // Rol del usuario (opcional)
   // roles?: string[]; // Opcional: Roles para permisos más detallados
 }
 
@@ -179,6 +182,11 @@ export class TransactionsController {
         if (proxyResponse.data?.status === 0) {
           console.log(`[${opId}] SUCCESS: Proxy accepted. Updating transaction ${transactionId} status to Aceptado.`);
           const updatedTransaction = await this.ipnService.updateTransactionStatus(transactionId, 'Aceptado');
+
+          // Actualizar descripción con el usuario que aceptó manualmente
+          const username = request.user?.username || request.user?.email || request.user?.id?.toString() || 'usuario';
+          await this.ipnService.updateTransactionDescription(transactionId, `Aceptado manual por ${username}`);
+
           // Guardar info adicional si es necesario
           if (proxyResponse.data.result?.new_balance) {
             await this.ipnService.updateTransactionInfo(transactionId, { externalBalance: proxyResponse.data.result.new_balance });
@@ -270,7 +278,10 @@ export class TransactionsController {
     // 4. Actualizar estado a 'Rechazado'
     console.log(`[${opId}] Updating transaction ${id} status to Rechazado.`);
     const updatedTransaction = await this.ipnService.updateTransactionStatus(id, 'Rechazado');
-    // No necesitamos !updatedTransaction check si getTransactionById ya lo hizo
+
+    // Actualizar descripción con el usuario que rechazó manualmente
+    const username = request.user?.username || request.user?.email || request.user?.id?.toString() || 'usuario';
+    await this.ipnService.updateTransactionDescription(id, `Rechazado manualmente por ${username}`);
 
     console.log(`[${opId}] FIN: Transaction ${id} rejected successfully.`);
     return {
@@ -319,6 +330,10 @@ export class TransactionsController {
 
     // 4. Actualizar Estado
     const updatedTransaction = await this.ipnService.updateTransactionStatus(id, 'Rechazado');
+
+    // Actualizar descripción con el usuario que rechazó manualmente
+    const username = request.user?.username || request.user?.email || request.user?.id?.toString() || 'usuario';
+    await this.ipnService.updateTransactionDescription(id, `Rechazado manualmente por ${username}`);
 
     console.log(`[${opId}] FIN: Withdraw ${id} rejected successfully.`);
     return { status: 'success', message: 'Withdraw rejected successfully', transaction: updatedTransaction! };
@@ -392,6 +407,11 @@ export class TransactionsController {
         if (proxyResponse.data?.status === 0) {
           console.log(`[${opId}] SUCCESS: Withdraw Proxy accepted. Updating transaction ${id} to Aceptado.`);
           const updatedTransaction = await this.ipnService.updateTransactionStatus(id, 'Aceptado');
+
+          // Actualizar descripción con el usuario que aceptó manualmente
+          const username = request.user?.username || request.user?.email || request.user?.id?.toString() || 'usuario';
+          await this.ipnService.updateTransactionDescription(id, `Aceptado manual por ${username}`);
+
           // Guardar info adicional si aplica
           console.log(`[${opId}] FIN: Withdraw ${id} accepted successfully.`);
           return { status: 'success', message: 'Withdraw accepted and processed', transaction: updatedTransaction! };
