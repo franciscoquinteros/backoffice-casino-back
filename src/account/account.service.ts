@@ -241,4 +241,100 @@ export class AccountService {
     }
   }
 
+  async getNextAvailableCbu(amount: number, officeId?: string): Promise<string> {
+    console.log(`AccountService: Obteniendo siguiente CBU disponible para monto ${amount}${officeId ? ` en oficina ${officeId}` : ''}`);
+
+    // Monto máximo por cuenta antes de rotar (en pesos)
+    const MAX_AMOUNT_PER_ACCOUNT = 300000;
+
+    // Obtener todas las cuentas activas de MercadoPago ordenadas por acumulado
+    const whereCondition: any = {
+      wallet: 'mercadopago',
+      status: 'active'
+    };
+
+    if (officeId) {
+      whereCondition.agent = officeId;
+    }
+
+    // Buscar cuentas ordenadas por monto acumulado (de menor a mayor)
+    const accounts = await this.accountRepository.find({
+      where: whereCondition,
+      order: { accumulated_amount: 'ASC' }
+    });
+
+    if (!accounts || accounts.length === 0) {
+      throw new NotFoundException(`No active MercadoPago accounts found${officeId ? ` for office ${officeId}` : ''}`);
+    }
+
+    // Seleccionar la primera cuenta que tenga un monto acumulado menor a MAX_AMOUNT_PER_ACCOUNT
+    // Si todas superan el máximo, resetear los acumulados y usar la primera
+    let selectedAccount = accounts.find(account =>
+      Number(account.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT
+    );
+
+    // Si todas las cuentas superan el límite, resetear la primera para volver a empezar
+    if (!selectedAccount && accounts.length > 0) {
+      selectedAccount = accounts[0];
+      console.log(`AccountService: Todas las cuentas superan el límite. Reseteando la cuenta ${selectedAccount.name} (ID: ${selectedAccount.id})`);
+
+      // Resetear el monto acumulado de esta cuenta para reiniciar el ciclo
+      selectedAccount.accumulated_amount = 0;
+      await this.accountRepository.save(selectedAccount);
+    } else {
+      // Usar la cuenta con menor acumulado (ya seleccionada arriba)
+      selectedAccount = accounts[0];
+    }
+
+    console.log(`AccountService: Seleccionado CBU ${selectedAccount.cbu} (Cuenta: ${selectedAccount.name}, Acumulado: ${selectedAccount.accumulated_amount})`);
+
+    return selectedAccount.cbu;
+  }
+
+  async updateAccountAccumulatedAmount(cbu: string, amount: number): Promise<void> {
+    console.log(`AccountService: Actualizando monto acumulado para CBU ${cbu} con monto ${amount}`);
+
+    const account = await this.accountRepository.findOne({
+      where: { cbu }
+    });
+
+    if (!account) {
+      console.log(`AccountService: No se encontró cuenta con CBU ${cbu}`);
+      return;
+    }
+
+    // Actualizar el monto acumulado
+    account.accumulated_amount = Number(account.accumulated_amount) + Number(amount);
+
+    // Guardar la actualización
+    await this.accountRepository.save(account);
+
+    console.log(`AccountService: Monto acumulado actualizado para CBU ${cbu}. Nuevo acumulado: ${account.accumulated_amount}`);
+  }
+
+  async resetAccumulatedAmounts(officeId?: string): Promise<void> {
+    console.log(`AccountService: Reseteando montos acumulados${officeId ? ` para oficina ${officeId}` : ''}`);
+
+    const whereCondition: any = {};
+
+    if (officeId) {
+      whereCondition.agent = officeId;
+    }
+
+    // Buscar todas las cuentas que correspondan al filtro
+    const accounts = await this.accountRepository.find({
+      where: whereCondition
+    });
+
+    // Reiniciar el monto acumulado para cada cuenta
+    for (const account of accounts) {
+      account.accumulated_amount = 0;
+    }
+
+    // Guardar las actualizaciones
+    await this.accountRepository.save(accounts);
+
+    console.log(`AccountService: Montos acumulados reseteados para ${accounts.length} cuentas`);
+  }
+
 }

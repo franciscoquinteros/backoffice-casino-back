@@ -46,4 +46,7 @@ export class Account {
 
   @Column({ nullable: true })
   receiver_id: string;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  accumulated_amount: number;
 }

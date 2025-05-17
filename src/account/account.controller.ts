@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, Param, Delete, Put, HttpCode, HttpStatus, BadRequestException, Query, UseGuards, ParseIntPipe } from '@nestjs/common'; // Añadir ParseIntPipe si es necesario para IDs numéricos
 import { ApiOperation, ApiResponse, ApiTags, ApiQuery } from '@nestjs/swagger'; // Añadir ApiQuery
 import { AccountService } from './account.service';
-import { AccountDto, AccountsResponseDto, CbuSingleResponseDto, CreateAccountDto, UpdateAccountDto } from './dto/account.dto';
+import { AccountDto, AccountsResponseDto, CbuRotationResponseDto, CbuSingleResponseDto, CreateAccountDto, GetCbuRotationDto, UpdateAccountDto } from './dto/account.dto';
 import { ApiKeyAuth } from '../auth/apikeys/decorators/api-key-auth.decorator';
 import { API_PERMISSIONS } from '../auth/apikeys/permissions.constants';
 
@@ -127,5 +127,53 @@ export class AccountController {
         console.log(`[AccountController] remove: Filtering by officeId: ${officeId} for account ID: ${id}`);
         // El servicio ya espera el officeId como segundo argumento
         return this.accountService.remove(id, officeId);
+    }
+
+    @Get('cbu/rotate')
+    @ApiOperation({ summary: 'Get CBU based on amount rotation system' })
+    @ApiQuery({ name: 'amount', required: true, description: 'Amount to be deposited', type: Number })
+    @ApiQuery({ name: 'idAgent', required: true, description: 'ID of the office', type: String })
+    @ApiResponse({ status: 200, description: 'CBU selected for the specified amount', type: CbuRotationResponseDto })
+    @ApiResponse({ status: 400, description: 'Missing required parameters' })
+    @ApiResponse({ status: 404, description: 'No active accounts found for the specified office' })
+    async getCbuByRotation(
+        @Query('amount') amount: number,
+        @Query('idAgent') officeId: string
+    ): Promise<CbuRotationResponseDto> {
+        if (!amount || !officeId) {
+            throw new BadRequestException('amount and idAgent query parameters are required');
+        }
+
+        if (isNaN(Number(amount)) || Number(amount) <= 0) {
+            throw new BadRequestException('amount must be a positive number');
+        }
+
+        console.log(`[AccountController] getCbuByRotation: Requesting CBU for amount: ${amount}, officeId: ${officeId}`);
+
+        const cbu = await this.accountService.getNextAvailableCbu(Number(amount), officeId);
+
+        return {
+            cbu,
+            amount_received: Number(amount)
+        };
+    }
+
+    @Post('reset-amounts')
+    @ApiOperation({ summary: 'Reset accumulated amounts for all accounts in an office' })
+    @ApiQuery({ name: 'officeId', required: true, description: 'ID of the office', type: String })
+    @ApiResponse({ status: 200, description: 'Accumulated amounts have been reset successfully' })
+    @ApiResponse({ status: 400, description: 'officeId query parameter is required' })
+    async resetAccumulatedAmounts(
+        @Query('officeId') officeId: string
+    ): Promise<{ message: string }> {
+        if (!officeId) {
+            throw new BadRequestException('officeId query parameter is required');
+        }
+
+        console.log(`[AccountController] resetAccumulatedAmounts: Resetting amounts for officeId: ${officeId}`);
+
+        await this.accountService.resetAccumulatedAmounts(officeId);
+
+        return { message: 'Accumulated amounts reset successfully' };
     }
 }

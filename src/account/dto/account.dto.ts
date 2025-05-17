@@ -207,3 +207,12 @@ export class CbuSingleResponseDto {
   @ApiProperty({ type: String })
   cbu: string;
 }
+
+export class CbuRotationResponseDto {
+  cbu: string;
+  amount_received: number;
+}
+
+export class GetCbuRotationDto {
+  amount: number;
+}

@@ -10,6 +10,7 @@ import { AccountModule } from '../account/account.module';
 import { ChatModule } from 'src/chat/chat.module';
 import { TransactionEntity } from './entities/transaction.entity';
 import { ExternalDepositController } from './deposit/external-deposit.controller';
+import { CbuRotationController } from './deposit/cbu-rotation.controller';
 
 @Module({
   imports: [
@@ -17,7 +18,14 @@ import { ExternalDepositController } from './deposit/external-deposit.controller
     forwardRef(() => AccountModule),
     forwardRef(() => ChatModule),
   ],
-  controllers: [IpnController, DepositController, TransactionsController, ExternalDepositController, ExternalWithdrawController],
+  controllers: [
+    IpnController,
+    DepositController,
+    TransactionsController,
+    ExternalDepositController,
+    ExternalWithdrawController,
+    CbuRotationController
+  ],
   providers: [IpnService],
   exports: [IpnService],
 })

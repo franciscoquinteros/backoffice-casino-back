@@ -765,6 +765,28 @@ export class IpnService implements OnModuleInit {
       }
     }
 
+    // Al final del método, donde el depósito es confirmado como exitoso
+    if (savedMpTransaction &&
+      savedMpTransaction.status === 'approved' &&
+      savedMpTransaction.type === 'deposit' &&
+      savedMpTransaction.cbu) {
+
+      // Actualizar el monto acumulado para este CBU
+      try {
+        console.log(`[IPN] ${savedMpTransaction.id}: Actualizando monto acumulado para CBU ${savedMpTransaction.cbu} con monto ${savedMpTransaction.amount}`);
+
+        await this.accountService.updateAccountAccumulatedAmount(
+          savedMpTransaction.cbu,
+          savedMpTransaction.amount
+        );
+
+        console.log(`[IPN] ${savedMpTransaction.id}: Monto acumulado actualizado exitosamente`);
+      } catch (error) {
+        console.error(`[IPN] ${savedMpTransaction.id}: Error al actualizar monto acumulado:`, error);
+        // No fallamos la operación completa, solo registramos el error
+      }
+    }
+
     return {
       status: 'success',
       message: 'Notificación de Mercado Pago procesada correctamente.',
@@ -905,6 +927,20 @@ export class IpnService implements OnModuleInit {
     // Si la transacción ya está Aceptada, no buscar match
     if (savedUserTransaction.status === 'Aceptado') {
       console.log(`[${opId}] Depósito de usuario ${savedUserTransaction.id} ya estaba Aceptado.`);
+      // Actualizar el monto acumulado para este CBU
+      try {
+        console.log(`[${opId}] Actualizando monto acumulado para CBU ${savedUserTransaction.cbu} con monto ${savedUserTransaction.amount}`);
+
+        await this.accountService.updateAccountAccumulatedAmount(
+          savedUserTransaction.cbu,
+          savedUserTransaction.amount
+        );
+
+        console.log(`[${opId}] Monto acumulado actualizado exitosamente`);
+      } catch (error) {
+        console.error(`[${opId}] Error al actualizar monto acumulado:`, error);
+        // No fallamos la operación completa, solo registramos el error
+      }
       return {
         status: 'success',
         message: 'Este depósito ya fue validado.',
@@ -1014,6 +1050,20 @@ export class IpnService implements OnModuleInit {
             });
           }
           console.log(`[${opId}] FIN: Transacción ${savedUserTransaction.id} aceptada automáticamente.`);
+          // Actualizar el monto acumulado para este CBU
+          try {
+            console.log(`[${opId}] Actualizando monto acumulado para CBU ${savedUserTransaction.cbu} con monto ${savedUserTransaction.amount}`);
+
+            await this.accountService.updateAccountAccumulatedAmount(
+              savedUserTransaction.cbu,
+              savedUserTransaction.amount
+            );
+
+            console.log(`[${opId}] Monto acumulado actualizado exitosamente`);
+          } catch (error) {
+            console.error(`[${opId}] Error al actualizar monto acumulado:`, error);
+            // No fallamos la operación completa, solo registramos el error
+          }
           return {
             status: 'success',
             message: 'Depósito validado y procesado automáticamente.',
@@ -1275,6 +1325,16 @@ export class IpnService implements OnModuleInit {
   // Actualizar transacción (por ejemplo, al aceptar una transacción)
   async updateTransactionStatus(id: string, status: string): Promise<Transaction | null> {
     try {
+      // Guardar el estado anterior para comparar
+      const transaction = await this.getTransactionById(id);
+
+      if (!transaction) {
+        console.warn(`No se encontró la transacción ${id} para actualizar el estado`);
+        return null;
+      }
+
+      const previousStatus = transaction.status;
+
       // Actualizar en BD
       await this.transactionRepository.update(id, { status });
 
@@ -1289,6 +1349,26 @@ export class IpnService implements OnModuleInit {
         t.id.toString() === id ? this.mapEntityToTransaction(updatedEntity) : t
       );
 
+      // Si es un depósito que pasa a estado "Aceptado", actualizar el monto acumulado
+      if (transaction.type === 'deposit'
+        && status === 'Aceptado'
+        && previousStatus !== 'Aceptado'
+        && transaction.cbu) {
+        try {
+          console.log(`[UpdateStatus] Actualizando monto acumulado para CBU ${transaction.cbu} con monto ${transaction.amount}`);
+
+          await this.accountService.updateAccountAccumulatedAmount(
+            transaction.cbu,
+            transaction.amount
+          );
+
+          console.log(`[UpdateStatus] Monto acumulado actualizado exitosamente`);
+        } catch (error) {
+          console.error(`[UpdateStatus] Error al actualizar monto acumulado:`, error);
+          // No fallamos la operación completa, solo registramos el error
+        }
+      }
+
       return this.mapEntityToTransaction(updatedEntity);
     } catch (error) {
       console.error(`Error al actualizar estado de transacción ${id}:`, error);
@@ -1296,81 +1376,8 @@ export class IpnService implements OnModuleInit {
     }
   }
 
-  private async isValidCbu(cbu: string, officeId?: string): Promise<boolean> {
-    if (!cbu) {
-      console.warn('isValidCbu: CBU is null or empty.');
-      return false;
-    }
-
-    console.log(`isValidCbu: Buscando cuenta para CBU ${cbu}${officeId ? ` en oficina ${officeId}` : ''}`);
-
-    // Buscar la cuenta que coincida con CBU, wallet, status, mp_client_id Y officeId (en la propiedad 'agent')
-    const account = this.accounts.find(acc =>
-      acc.cbu === cbu &&
-      acc.wallet === 'mercadopago' &&
-      acc.status === 'active' && // Only consider active accounts
-      acc.mp_client_id && // Ensure it has the necessary MP client ID for mapping
-      (!officeId || acc.agent === officeId) // <-- ¡CORRECCIÓN! Usar acc.agent en lugar de acc.office
-      // Si officeId no se proporciona, esta condición es true. Si se proporciona, acc.agent must match.
-    );
-
-    if (!account) {
-      console.warn(`isValidCbu: No se encontró una cuenta activa de Mercado Pago configurada para el CBU: ${cbu}${officeId ? ` en oficina ${officeId}` : ''}`);
-      return false;
-    }
-
-    console.log(`isValidCbu: CBU ${cbu} validado contra cuenta configurada ${account.name} (ID: ${account.id}) en oficina ${account.agent}.`);
-    return true;
-  }
-
-  // Buscar cuenta por receiver_id de Mercado Pago
-  private findAccountByReceiverId(receiverId: string): Account | undefined {
-    console.log(`Buscando cuenta configurada para receiver_id: ${receiverId}`);
-
-    if (receiverId === undefined || receiverId === null) {
-      console.warn("findAccountByReceiverId fue llamada con un receiver_id null o undefined.");
-      return undefined;
-    }
-
-    console.log(`Buscando cuenta para receiver_id: ${receiverId}`);
-    console.log("Todas las cuentas disponibles:", this.accounts.map(acc => ({
-      id: acc.id,
-      name: acc.name,
-      agent: acc.agent,
-      office: acc.office,
-      mp_client_id: acc.mp_client_id,
-      receiver_id: acc.receiver_id,
-    })));
-
-    const receiverIdStr = receiverId.toString();
-
-    // Buscar la cuenta que coincida con el receiver_id
-    const account = this.accounts.find(acc =>
-      acc.wallet === 'mercadopago' &&
-      acc.status === 'active' &&
-      acc.receiver_id &&
-      acc.receiver_id.toString() === receiverIdStr
-    );
-
-    if (account) {
-      console.log(`Cuenta encontrada: ${account.name} (ID: ${account.id}) con office: ${account.office}`);
-      return account;
-    }
-
-    console.log(`No se encontró cuenta para receiver_id: ${receiverId}`);
-    return undefined;
-  }
-
-  private matchCbuWithMp(transaction: Transaction | PaymentData, cbu: string): boolean {
-    // Para depuración
-    console.log(`matchCbuWithMp: Verificando coincidencia entre transacción ID: ${transaction.id || 'Sin ID'} y CBU: ${cbu}`);
-    console.log(`matchCbuWithMp: Datos de transacción - receiver_id: ${transaction.receiver_id || 'null'}, cbu: ${(transaction as Transaction).cbu || 'null'}`);
-
-    // Casos especiales para transacciones locales (ambas tienen CBU)
-    if ((transaction as Transaction).cbu && (transaction as Transaction).cbu === cbu) {
-      console.log(`matchCbuWithMp: ¡COINCIDENCIA DIRECTA DE CBU!`);
-      return true;
-    }
+  private matchCbuWithMp(transaction: any, cbu: string): boolean {
+    console.log(`matchCbuWithMp: Verificando coincidencia entre MP y CBU...`);
 
     // Resto de la lógica existente
     if (!('receiver_id' in transaction) || !transaction.receiver_id) {
@@ -1471,6 +1478,71 @@ export class IpnService implements OnModuleInit {
     }
 
     console.log(`No se encontró cuenta para CBU: ${cbu} después de intentar recargar`);
+    return undefined;
+  }
+
+  private async isValidCbu(cbu: string, officeId?: string): Promise<boolean> {
+    if (!cbu) {
+      console.warn('isValidCbu: CBU is null or empty.');
+      return false;
+    }
+
+    console.log(`isValidCbu: Buscando cuenta para CBU ${cbu}${officeId ? ` en oficina ${officeId}` : ''}`);
+
+    // Buscar la cuenta que coincida con CBU, wallet, status, mp_client_id Y officeId (en la propiedad 'agent')
+    const account = this.accounts.find(acc =>
+      acc.cbu === cbu &&
+      acc.wallet === 'mercadopago' &&
+      acc.status === 'active' && // Only consider active accounts
+      acc.mp_client_id && // Ensure it has the necessary MP client ID for mapping
+      (!officeId || acc.agent === officeId) // <-- ¡CORRECCIÓN! Usar acc.agent en lugar de acc.office
+      // Si officeId no se proporciona, esta condición es true. Si se proporciona, acc.agent must match.
+    );
+
+    if (!account) {
+      console.warn(`isValidCbu: No se encontró una cuenta activa de Mercado Pago configurada para el CBU: ${cbu}${officeId ? ` en oficina ${officeId}` : ''}`);
+      return false;
+    }
+
+    console.log(`isValidCbu: CBU ${cbu} validado contra cuenta configurada ${account.name} (ID: ${account.id}) en oficina ${account.agent}.`);
+    return true;
+  }
+
+  // Buscar cuenta por receiver_id de Mercado Pago
+  private findAccountByReceiverId(receiverId: string): Account | undefined {
+    console.log(`Buscando cuenta configurada para receiver_id: ${receiverId}`);
+
+    if (receiverId === undefined || receiverId === null) {
+      console.warn("findAccountByReceiverId fue llamada con un receiver_id null o undefined.");
+      return undefined;
+    }
+
+    console.log(`Buscando cuenta para receiver_id: ${receiverId}`);
+    console.log("Todas las cuentas disponibles:", this.accounts.map(acc => ({
+      id: acc.id,
+      name: acc.name,
+      agent: acc.agent,
+      office: acc.office,
+      mp_client_id: acc.mp_client_id,
+      receiver_id: acc.receiver_id,
+    })));
+
+    const receiverIdStr = receiverId.toString();
+
+    // Buscar la cuenta que coincida con el receiver_id
+    const account = this.accounts.find(acc =>
+      acc.wallet === 'mercadopago' &&
+      acc.status === 'active' &&
+      acc.receiver_id &&
+      acc.receiver_id.toString() === receiverIdStr
+    );
+
+    if (account) {
+      console.log(`Cuenta encontrada: ${account.name} (ID: ${account.id}) con office: ${account.office}`);
+      return account;
+    }
+
+    console.log(`No se encontró cuenta para receiver_id: ${receiverId}`);
     return undefined;
   }
 }
