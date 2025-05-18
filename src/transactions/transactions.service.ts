@@ -177,16 +177,31 @@ export class IpnService implements OnModuleInit {
     try {
       // Cargar todas las cuentas al iniciar el servicio
       this.accounts = await this.accountService.findAll();
-      console.log(`Servicio IPN inicializado con ${this.accounts.length} cuentas configuradas`);
 
-      // Cargar transacciones existentes desde la BD
+      // Debug: Log detallado de cuentas configuradas
+      for (const account of this.accounts) {
+        if (account.wallet === 'mercadopago' && account.status === 'active') {
+          console.log(`Cuenta MP activa encontrada: ID=${account.id}, Name=${account.name}, CBU=${account.cbu}, receiver_id=${account.receiver_id}, mp_client_id=${account.mp_client_id}`);
+        }
+      }
+
+      console.log(`Servicio IPN inicializado con ${this.accounts.length} cuentas configuradas (${this.accounts.filter(a => a.wallet === 'mercadopago' && a.status === 'active').length} cuentas MP activas)`);
+
+      // Cargar transacciones PENDIENTES desde la BD para matcheo
       try {
-        const dbTransactions = await this.transactionRepository.find({
+        // IMPORTANTE: Cargar solo transacciones pendientes para optimizar memoria y matcheo
+        const pendingTransactions = await this.transactionRepository.find({
+          where: { status: 'Pending' },
           order: { dateCreated: 'DESC' }
         });
 
-        this.transactions = dbTransactions.map(entity => this.mapEntityToTransaction(entity));
-        console.log(`Cargadas ${this.transactions.length} transacciones desde la base de datos`);
+        this.transactions = pendingTransactions.map(entity => this.mapEntityToTransaction(entity));
+        console.log(`Cargadas ${this.transactions.length} transacciones pendientes desde la base de datos`);
+
+        // Debug: Mostrar las transacciones pendientes para diagnóstico
+        this.transactions.forEach(tx => {
+          console.log(`Transacción pendiente cargada: ID=${tx.id}, Amount=${tx.amount}, Email=${tx.payer_email}, CBU=${tx.cbu}, Office=${tx.office}`);
+        });
 
         // Actualizar automáticamente los nombres de cuentas de transacciones pendientes
         this.updateAllAccountNames();
@@ -672,7 +687,8 @@ export class IpnService implements OnModuleInit {
     if (savedMpTransaction.status === 'Pending') {
       console.log(`[IPN] ${savedMpTransaction.id}: Buscando depósito externo coincidente...`);
 
-      const matchingExternalDeposit = this.transactions.find(externalTx => {
+      // Buscar primero en memoria (this.transactions)
+      let matchingExternalDeposit = this.transactions.find(externalTx => {
         // Ignorar la misma transacción si ya existe
         if (externalTx.id === savedMpTransaction.id) {
           console.log(`[IPN] ${savedMpTransaction.id}: Ignorando transacción con mismo ID: ${externalTx.id}`);
@@ -697,7 +713,8 @@ export class IpnService implements OnModuleInit {
         const matchEmail = mpEmail && extEmail && mpEmail === extEmail;
         const matchDni = mpDni && extDni && mpDni === extDni;
 
-        return (
+        // Criterios de coincidencia
+        const isMatch = (
           externalTx.type === 'deposit' &&
           externalTx.status === 'Pending' &&
           !externalTx.reference_transaction &&
@@ -711,7 +728,73 @@ export class IpnService implements OnModuleInit {
           this.isDateCloseEnough(savedMpTransaction.date_created, externalTx.date_created) &&
           externalTx.office === savedMpTransaction.office // Asegurar que coincidan las oficinas
         );
+
+        // Si encuentra coincidencia, loguear los detalles para diagnóstico
+        if (isMatch) {
+          console.log(`[IPN] ${savedMpTransaction.id}: Coincidencia potencial con TX ${externalTx.id}`, {
+            amount: { mp: savedMpTransaction.amount, ext: externalTx.amount },
+            email: { mp: mpEmail, ext: extEmail },
+            dni: { mp: mpDni, ext: extDni, match: matchDni || matchDniEmail },
+            office: { mp: savedMpTransaction.office, ext: externalTx.office }
+          });
+        }
+
+        return isMatch;
       });
+
+      // Si no se encuentra en memoria, intentar buscar directamente en la DB
+      if (!matchingExternalDeposit) {
+        console.log(`[IPN] ${savedMpTransaction.id}: No se encontró match en memoria, buscando en BD...`);
+        try {
+          // Buscar transacciones pendientes en la BD
+          const pendingDepositsInDB = await this.transactionRepository.find({
+            where: {
+              type: 'deposit',
+              status: 'Pending',
+              // No filtramos por referenceTransaction aquí, lo haremos en el código
+              office: savedMpTransaction.office
+            }
+          });
+
+          // Mapear las entidades a Transaction
+          const pendingMappedDeposits = pendingDepositsInDB.map(entity => this.mapEntityToTransaction(entity));
+
+          // Buscar coincidencia con los mismos criterios
+          matchingExternalDeposit = pendingMappedDeposits.find(externalTx => {
+            // Ignorar la misma transacción
+            if (externalTx.id === savedMpTransaction.id) return false;
+            // No considerar si ya tiene referencia
+            if (externalTx.reference_transaction) return false;
+
+            const mpEmail = savedMpTransaction.payer_email?.toLowerCase();
+            const extEmail = externalTx.payer_email?.toLowerCase();
+            const matchEmail = mpEmail && extEmail && mpEmail === extEmail;
+
+            return (
+              typeof externalTx.amount === 'number' &&
+              externalTx.amount > 0 &&
+              externalTx.amount === savedMpTransaction.amount &&
+              matchEmail &&
+              externalTx.date_created &&
+              savedMpTransaction.date_created &&
+              this.isDateCloseEnough(savedMpTransaction.date_created, externalTx.date_created) &&
+              externalTx.office === savedMpTransaction.office
+            );
+          });
+
+          // Si encontramos coincidencia en la BD, añadirla a memoria
+          if (matchingExternalDeposit) {
+            console.log(`[IPN] ${savedMpTransaction.id}: Encontrada coincidencia en BD con ID: ${matchingExternalDeposit.id}`);
+            // Añadirla a memoria para futuros matches
+            if (!this.transactions.some(tx => tx.id === matchingExternalDeposit.id)) {
+              this.transactions.push(matchingExternalDeposit);
+              console.log(`[IPN] ${savedMpTransaction.id}: Transacción ${matchingExternalDeposit.id} añadida a memoria`);
+            }
+          }
+        } catch (error) {
+          console.error(`[IPN] ${savedMpTransaction.id}: Error buscando en BD:`, error);
+        }
+      }
 
       if (matchingExternalDeposit) {
         console.log(`[IPN] ${savedMpTransaction.id}: ¡Coincidencia encontrada con depósito externo ID: ${matchingExternalDeposit.id}`);
@@ -1437,8 +1520,9 @@ export class IpnService implements OnModuleInit {
 
   private matchCbuWithMp(transaction: any, cbu: string): boolean {
     console.log(`matchCbuWithMp: Verificando coincidencia entre MP y CBU...`);
+    console.log(`matchCbuWithMp: Datos de la transacción: id=${transaction.id}, receiver_id=${transaction.receiver_id}, cbu=${transaction.cbu}`);
 
-    // Resto de la lógica existente
+    // Verificaciones básicas
     if (!('receiver_id' in transaction) || !transaction.receiver_id) {
       console.log(`matchCbuWithMp: Transacción no tiene receiver_id.`);
       return false;
@@ -1449,37 +1533,35 @@ export class IpnService implements OnModuleInit {
       return false;
     }
 
-    const mappedCbuIdentifier = this.mapCbuToMpIdentifier(cbu);
-
-    if (!mappedCbuIdentifier) {
-      console.log(`matchCbuWithMp: No se pudo mapear CBU ${cbu} a identificador MP.`);
-      return false;
-    }
-
-    const receiverIdMatch = mappedCbuIdentifier === transaction.receiver_id;
-    const cvuCheck = transaction.payment_method_id === 'cvu' && (transaction as Transaction).type === 'deposit';
-    const isMatch = receiverIdMatch || cvuCheck;
-
-    console.log(`matchCbuWithMp: Resultado final isMatch = ${isMatch} (receiverIdMatch: ${receiverIdMatch}, cvuCheck: ${cvuCheck})`);
-    return isMatch;
-  }
-
-  private mapCbuToMpIdentifier(cbu: string): string {
-    // Buscar en la lista de cuentas configuradas
-    // Asegurarse de que la cuenta esté activa, sea de mercadopago y tenga mp_client_id
+    // Buscar la cuenta para este CBU
     const account = this.accounts.find(acc =>
       acc.cbu === cbu &&
       acc.wallet === 'mercadopago' &&
-      acc.status === 'active' && // Solo considerar cuentas activas
-      acc.mp_client_id // Asegurarse de que tenga el ID de cliente MP necesario para mapeo
+      acc.status === 'active'
     );
 
-    if (account?.mp_client_id) {
-      return account.mp_client_id;
+    if (!account) {
+      console.log(`matchCbuWithMp: No se encontró cuenta para CBU ${cbu}`);
+      return false;
     }
 
-    console.warn(`mapCbuToMpIdentifier: No se encontró un identificador mp_client_id configurado para el CBU: ${cbu}`);
-    return '';
+    console.log(`matchCbuWithMp: Encontrada cuenta con mp_client_id=${account.mp_client_id}, receiver_id=${account.receiver_id}`);
+
+    // CORRECCIÓN: Verificar tanto con mp_client_id como con receiver_id
+    const receiverIdMatch =
+      transaction.receiver_id === account.receiver_id ||
+      transaction.receiver_id === account.mp_client_id;
+
+    // Mantener la verificación adicional para CVU
+    const cvuCheck = transaction.payment_method_id === 'cvu' && (transaction as Transaction).type === 'deposit';
+
+    // Opción de última instancia: match directo por CBU
+    const cbuMatch = transaction.cbu === cbu;
+
+    const isMatch = receiverIdMatch || cvuCheck || cbuMatch;
+
+    console.log(`matchCbuWithMp: Resultado final isMatch = ${isMatch} (receiverIdMatch: ${receiverIdMatch}, cvuCheck: ${cvuCheck}, cbuMatch: ${cbuMatch})`);
+    return isMatch;
   }
 
   // Helper para extraer el DNI de un CUIT/CUIL (8 dígitos del medio)
