@@ -489,10 +489,21 @@ export class IpnService implements OnModuleInit {
 
 
   private isDateCloseEnough(date1Str: string | undefined, date2Str: string | undefined): boolean {
-    if (!date1Str || !date2Str) return false;
+    console.log(`isDateCloseEnough: Comparando fechas: ${date1Str} vs ${date2Str}`);
+
+    if (!date1Str || !date2Str) {
+      console.log(`isDateCloseEnough: Al menos una de las fechas es null o undefined`);
+      return false;
+    }
+
     try {
-      const d1 = new Date(date1Str);
-      const d2 = new Date(date2Str);
+      // Asegurarnos que las fechas estén en formato ISO para comparación consistente
+      const d1Parsed = new Date(date1Str);
+      const d2Parsed = new Date(date2Str);
+
+      // Si no es una fecha válida, intenta convertir desde formato de postgres YYYY-MM-DD HH:MM:SS
+      const d1 = !isNaN(d1Parsed.getTime()) ? d1Parsed : new Date(date1Str.replace(' ', 'T'));
+      const d2 = !isNaN(d2Parsed.getTime()) ? d2Parsed : new Date(date2Str.replace(' ', 'T'));
 
       // Verificar si las fechas son válidas
       if (isNaN(d1.getTime()) || isNaN(d2.getTime())) {
@@ -502,14 +513,49 @@ export class IpnService implements OnModuleInit {
 
       const diffMs = Math.abs(d1.getTime() - d2.getTime());
       const diffHours = diffMs / (1000 * 60 * 60); // Diferencia en horas
-      const maxDiffHours = 24; // Tolerancia de 24 horas para transferencias ( configurable )
+      const maxDiffHours = 48; // Aumentamos a 48 horas de tolerancia
 
-      // console.log(`isDateCloseEnough: Comparando fechas: ${date1Str} vs ${date2Str}. Diferencia en horas: ${diffHours}. Tolerancia: ${maxDiffHours}`);
+      // Log detallado
+      console.log(`isDateCloseEnough: Fecha 1 (parseada): ${d1.toISOString()}`);
+      console.log(`isDateCloseEnough: Fecha 2 (parseada): ${d2.toISOString()}`);
+      console.log(`isDateCloseEnough: Diferencia en horas: ${diffHours.toFixed(2)}. Tolerancia: ${maxDiffHours}h`);
 
-      return diffHours <= maxDiffHours;
+      if (diffHours <= maxDiffHours) {
+        console.log(`isDateCloseEnough: MATCH - Las fechas están dentro del rango de tolerancia (${maxDiffHours}h)`);
+        return true;
+      } else {
+        console.log(`isDateCloseEnough: NO MATCH - Las fechas exceden el rango de tolerancia (${maxDiffHours}h)`);
+        return false;
+      }
     } catch (error) {
       console.error(`Error en isDateCloseEnough al parsear fechas: ${date1Str}, ${date2Str}`, error);
-      return false; // Retornar false si hay error al parsear
+      console.log(`isDateCloseEnough: Intentando otro método de comparación...`);
+
+      // Método alternativo en caso de error: comparar fechas como strings después de normalizar
+      try {
+        // Convertir ambos a formato YYYY-MM-DD
+        const normalizeDate = (dateStr: string) => {
+          if (dateStr.includes('T')) {
+            return dateStr.split('T')[0];
+          } else if (dateStr.includes(' ')) {
+            return dateStr.split(' ')[0];
+          }
+          return dateStr;
+        };
+
+        const d1Norm = normalizeDate(date1Str);
+        const d2Norm = normalizeDate(date2Str);
+
+        console.log(`isDateCloseEnough: Comparación alternativa: ${d1Norm} vs ${d2Norm}`);
+
+        // Si coinciden en año-mes-día, consideramos match
+        const match = d1Norm === d2Norm;
+        console.log(`isDateCloseEnough: Comparación alternativa resultado: ${match}`);
+        return match;
+      } catch (innerError) {
+        console.error(`Error en método alternativo de comparación:`, innerError);
+        return false; // Retornar false si hay error al parsear
+      }
     }
   }
 
@@ -1044,11 +1090,73 @@ export class IpnService implements OnModuleInit {
     }
 
     // Buscar transacciones pendientes de Mercado Pago que coincidan con los criterios
+    console.log(`[${opId}] Iniciando búsqueda de coincidencias para depósito externo ID=${savedUserTransaction.id}, Email=${savedUserTransaction.payer_email}, Monto=${savedUserTransaction.amount}, Office=${savedUserTransaction.office}, CBU=${savedUserTransaction.cbu}`);
+
+    // Primero verificar cuántas transacciones hay en memoria
+    console.log(`[${opId}] Transacciones en memoria: ${this.transactions.length}`);
+
+    // Verificar transacciones MP en memoria con el mismo email
+    const mpTransactionsWithSameEmail = this.transactions.filter(tx =>
+      tx.type === 'deposit' &&
+      tx.status === 'Pending' &&
+      tx.payer_email?.toLowerCase() === savedUserTransaction.payer_email?.toLowerCase());
+
+    console.log(`[${opId}] Transacciones MP en memoria con mismo email (${savedUserTransaction.payer_email}): ${mpTransactionsWithSameEmail.length}`);
+
+    // Mostrar detalles de las transacciones con el mismo email
+    if (mpTransactionsWithSameEmail.length > 0) {
+      mpTransactionsWithSameEmail.forEach(tx => {
+        console.log(`[${opId}] Transacción MP con mismo email: ID=${tx.id}, Monto=${tx.amount}, Office=${tx.office}, CBU=${tx.cbu}, Fecha=${tx.date_created}`);
+      });
+    }
+
+    // Si no hay en memoria, intentar consulta directa a la BD
+    if (mpTransactionsWithSameEmail.length === 0) {
+      console.log(`[${opId}] Buscando coincidencias directamente en BD por email=${savedUserTransaction.payer_email}`);
+      try {
+        // Consulta personalizada para buscar coincidencias por email
+        const mpInDb = await this.transactionRepository.find({
+          where: {
+            type: 'deposit',
+            status: 'Pending',
+            payerEmail: savedUserTransaction.payer_email
+          }
+        });
+
+        console.log(`[${opId}] Encontradas ${mpInDb.length} transacciones en BD con email=${savedUserTransaction.payer_email}`);
+
+        if (mpInDb.length > 0) {
+          // Mapear y cargar en memoria
+          const mappedTransactions = mpInDb.map(entity => this.mapEntityToTransaction(entity));
+          console.log(`[${opId}] Detalles de transacciones encontradas en BD por email:`,
+            mappedTransactions.map(tx => ({
+              id: tx.id,
+              amount: tx.amount,
+              office: tx.office,
+              date: tx.date_created
+            }))
+          );
+
+          // Agregar a memoria las transacciones no existentes
+          for (const tx of mappedTransactions) {
+            if (!this.transactions.some(t => t.id === tx.id)) {
+              this.transactions.push(tx);
+              console.log(`[${opId}] Añadida transacción ${tx.id} a memoria desde BD`);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`[${opId}] Error buscando en BD por email:`, error);
+      }
+    }
+
     const pendingMpTransactions = await this.getTransactions(
       userDepositTransaction.office, // Filtrar por oficina
       'deposit',                    // Filtrar por tipo
       'Pending'                     // Filtrar por estado
     );
+
+    console.log(`[${opId}] Obtenidas ${pendingMpTransactions.length} transacciones pendientes de tipo depósito en office ${userDepositTransaction.office}`);
 
     // Filtrar las transacciones que coinciden con los criterios
     const matchingTransaction = pendingMpTransactions.find(mpTx => {
@@ -1058,47 +1166,63 @@ export class IpnService implements OnModuleInit {
         return false;
       }
 
-      // Verificar que sea una transacción de Mercado Pago (tiene payer_identification)
-      if (!mpTx.payer_identification) {
-        console.log(`[${opId}] Ignorando transacción que no es de Mercado Pago (no tiene payer_identification): ${mpTx.id}`);
+      // Verificar que sea una transacción de Mercado Pago (tiene payer_identification o receiver_id)
+      const isMercadoPagoTx = mpTx.payer_identification || mpTx.receiver_id;
+      if (!isMercadoPagoTx) {
+        console.log(`[${opId}] La transacción ${mpTx.id} no es de Mercado Pago (faltan identificadores)`);
         return false;
       }
 
+      // Verificar criterio por criterio e informar
+      const typeMatch = mpTx.type === 'deposit';
+      if (!typeMatch) console.log(`[${opId}] La transacción ${mpTx.id} no es un depósito`);
+
+      const statusMatch = mpTx.status === 'Pending';
+      if (!statusMatch) console.log(`[${opId}] La transacción ${mpTx.id} no está en estado Pending: ${mpTx.status}`);
+
+      const noRelatedUserMatch = !mpTx.relatedUserTransactionId;
+      if (!noRelatedUserMatch) console.log(`[${opId}] La transacción ${mpTx.id} ya tiene relatedUserTransactionId: ${mpTx.relatedUserTransactionId}`);
+
+      const amountValid = typeof mpTx.amount === 'number' && mpTx.amount > 0;
+      if (!amountValid) console.log(`[${opId}] La transacción ${mpTx.id} tiene un monto inválido: ${mpTx.amount}`);
+
+      const amountMatch = amountValid && mpTx.amount === savedUserTransaction.amount;
+      if (amountValid && !amountMatch) console.log(`[${opId}] Montos diferentes: MP=${mpTx.amount}, User=${savedUserTransaction.amount}`);
+
+      // Verificar emails (log detallado)
+      const mpEmail = mpTx.payer_email?.toLowerCase();
+      const userEmail = savedUserTransaction.payer_email?.toLowerCase();
+      console.log(`[${opId}] Comparando emails - MP: ${mpEmail}, User: ${userEmail}`);
+
+      const emailsValid = mpEmail && userEmail;
+      if (!emailsValid) console.log(`[${opId}] Al menos uno de los emails es inválido: MP=${mpEmail}, User=${userEmail}`);
+
+      const emailMatch = emailsValid && mpEmail === userEmail;
+      if (emailsValid && !emailMatch) console.log(`[${opId}] Los emails no coinciden: MP=${mpEmail}, User=${userEmail}`);
+
+      // Verificar fechas
+      const datesValid = mpTx.date_created && savedUserTransaction.date_created;
+      if (!datesValid) console.log(`[${opId}] Al menos una de las fechas es inválida: MP=${mpTx.date_created}, User=${savedUserTransaction.date_created}`);
+
+      const dateMatch = datesValid && this.isDateCloseEnough(mpTx.date_created, savedUserTransaction.date_created);
+      if (datesValid && !dateMatch) console.log(`[${opId}] Las fechas no están lo suficientemente cercanas: MP=${mpTx.date_created}, User=${savedUserTransaction.date_created}`);
+
+      // Verificar oficina
+      const officeMatch = mpTx.office === savedUserTransaction.office;
+      if (!officeMatch) console.log(`[${opId}] Las oficinas no coinciden: MP=${mpTx.office}, User=${savedUserTransaction.office}`);
+
       const isMatch = (
-        mpTx.type === 'deposit' &&
-        mpTx.status === 'Pending' &&
-        !mpTx.relatedUserTransactionId &&
-        typeof mpTx.amount === 'number' && mpTx.amount > 0 &&
-        mpTx.amount === savedUserTransaction.amount &&
-        mpTx.payer_email && savedUserTransaction.payer_email &&
-        mpTx.payer_email.toLowerCase() === savedUserTransaction.payer_email.toLowerCase() &&
-        mpTx.date_created && savedUserTransaction.date_created &&
-        this.isDateCloseEnough(mpTx.date_created, savedUserTransaction.date_created) &&
-        mpTx.office === savedUserTransaction.office
+        typeMatch &&
+        statusMatch &&
+        noRelatedUserMatch &&
+        amountMatch &&
+        emailMatch &&
+        dateMatch &&
+        officeMatch
       );
 
       if (isMatch) {
-        console.log(`[${opId}] Transacción MP ${mpTx.id} cumple con todos los criterios de match:`, {
-          id: mpTx.id,
-          type: mpTx.type,
-          status: mpTx.status,
-          amount: mpTx.amount,
-          email: mpTx.payer_email,
-          office: mpTx.office,
-          date_created: mpTx.date_created,
-          payer_identification: mpTx.payer_identification
-        });
-      } else {
-        console.log(`[${opId}] Transacción MP ${mpTx.id} no cumple con los criterios de match:`, {
-          type: mpTx.type,
-          status: mpTx.status,
-          hasRelatedUser: !!mpTx.relatedUserTransactionId,
-          amount: mpTx.amount,
-          email: mpTx.payer_email,
-          office: mpTx.office,
-          date_created: mpTx.date_created,
-          payer_identification: mpTx.payer_identification
-        });
+        console.log(`[${opId}] MATCH ENCONTRADO: Transacción MP ${mpTx.id} cumple con todos los criterios de match`);
       }
 
       return isMatch;
@@ -1189,7 +1313,88 @@ export class IpnService implements OnModuleInit {
         transaction: updatedUserTransaction
       };
     } else {
-      console.log(`[${opId}] No se encontró transacción MP coincidente. El depósito ${savedUserTransaction.id} queda PENDING.`);
+      console.log(`[${opId}] No se encontró transacción MP coincidente. Buscando directamente en la base de datos...`);
+
+      // Buscar directamente en la base de datos por email
+      try {
+        const directDbMatches = await this.transactionRepository.find({
+          where: {
+            type: 'deposit',
+            status: 'Pending',
+            payerEmail: savedUserTransaction.payer_email,
+            amount: savedUserTransaction.amount,
+          }
+        });
+
+        console.log(`[${opId}] Búsqueda directa en BD: Encontrados ${directDbMatches.length} registros con mismo email y monto`);
+
+        // Convertir a formato Transaction
+        const mappedMatches = directDbMatches.map(entity => this.mapEntityToTransaction(entity));
+
+        // Filtrar por coincidencias exactas excepto la transacción actual
+        const exactMatches = mappedMatches.filter(match =>
+          match.id !== savedUserTransaction.id &&
+          match.office === savedUserTransaction.office &&
+          !match.relatedUserTransactionId &&
+          this.isDateCloseEnough(match.date_created, savedUserTransaction.date_created)
+        );
+
+        if (exactMatches.length > 0) {
+          console.log(`[${opId}] ¡COINCIDENCIA ENCONTRADA DIRECTAMENTE EN BD! IDs: ${exactMatches.map(m => m.id).join(', ')}`);
+
+          // Usar la primera coincidencia encontrada
+          const directMatch = exactMatches[0];
+          console.log(`[${opId}] Usando primera coincidencia: ${directMatch.id}`);
+
+          // Hacer el mismo proceso de matcheo que arriba
+          await this.updateTransactionStatus(directMatch.id.toString(), 'Match');
+          await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Aceptado');
+
+          await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
+            referenceTransaction: directMatch.id.toString(),
+            description: `Depósito match (directo BD) con transacción MP ID: ${directMatch.id}`,
+            office: savedUserTransaction.office
+          });
+
+          await this.updateTransactionInfo(directMatch.id.toString(), {
+            relatedUserTransactionId: savedUserTransaction.id.toString(),
+            office: savedUserTransaction.office
+          });
+
+          // Llamar al proxy
+          try {
+            const proxyPayload = {
+              user_id: parseInt(savedUserTransaction.idCliente?.toString() || '0', 10),
+              amount: savedUserTransaction.amount,
+              transaction_id: savedUserTransaction.id.toString()
+            };
+
+            console.log(`[${opId}] Enviando payload al proxy (búsqueda directa):`, proxyPayload);
+            const proxyResponse = await axios.post('http://18.216.231.42:8080/deposit', proxyPayload);
+
+            if (proxyResponse.data?.status === 0) {
+              console.log(`[${opId}] SUCCESS: Proxy aceptó la transacción (búsqueda directa).`);
+              return {
+                status: 'success',
+                message: 'Depósito validado y procesado automáticamente (búsqueda directa).',
+                transaction: savedUserTransaction
+              };
+            } else {
+              throw new Error(`Error del proxy: ${proxyResponse.data?.error_message || 'Error desconocido'}`);
+            }
+          } catch (error) {
+            console.error(`[${opId}] ERROR (búsqueda directa): Falló comunicación con proxy:`, error.message);
+            throw error;
+          }
+        } else {
+          console.log(`[${opId}] Búsqueda directa: No se encontraron coincidencias exactas.`);
+        }
+      } catch (dbError) {
+        console.error(`[${opId}] Error en búsqueda directa en BD:`, dbError);
+      }
+
+      // Si llegamos aquí, no se encontró ninguna coincidencia
+      console.log(`[${opId}] El depósito ${savedUserTransaction.id} queda PENDING después de todas las búsquedas.`);
       return {
         status: 'success',
         message: 'Depósito registrado, pendiente de validación con Mercado Pago.',
@@ -1348,7 +1553,7 @@ export class IpnService implements OnModuleInit {
           description: raw.transaction_description,
           payment_method_id: raw.transaction_paymentMethodId,
           payer_id: raw.transaction_payerId,
-          payer_email: raw.transaction_payer_email || null, // Aseguramos que nunca sea undefined
+          payer_email: raw.transaction_payerEmail || raw.transaction_payer_email || null, // Intentar ambos nombres de campo
           external_reference: raw.transaction_externalReference || raw.transaction_external_reference || null,
           cbu: raw.transaction_cbu,
           wallet_address: raw.transaction_walletAddress,
@@ -1362,10 +1567,17 @@ export class IpnService implements OnModuleInit {
         };
 
         // Log para depurar valor de payer_email
-        if (raw.transaction_payer_email) {
-          console.log(`[TRANSACTION_MAP] ID=${transaction.id}: Se encontró payer_email=${raw.transaction_payer_email}`);
+        if (raw.transaction_payerEmail || raw.transaction_payer_email) {
+          console.log(`[getTransactions] ID=${transaction.id}: Email encontrado=${raw.transaction_payerEmail || raw.transaction_payer_email}`);
         } else {
-          console.log(`[TRANSACTION_MAP] ID=${transaction.id}: No se encontró payer_email en el resultado raw`);
+          // Mostrar todas las keys que tienen "email" o "payer" en su nombre
+          const emailKeys = Object.keys(raw).filter(k => k.toLowerCase().includes('email') || k.toLowerCase().includes('payer'));
+          if (emailKeys.length > 0) {
+            console.log(`[getTransactions] ID=${transaction.id}: Campos relacionados con email:`,
+              emailKeys.reduce((obj, key) => ({ ...obj, [key]: raw[key] }), {}));
+          } else {
+            console.log(`[getTransactions] ID=${transaction.id}: NO se encontraron campos relacionados con email`);
+          }
         }
 
         return transaction;
@@ -1685,5 +1897,131 @@ export class IpnService implements OnModuleInit {
 
     console.log(`No se encontró cuenta para receiver_id: ${receiverId}`);
     return undefined;
+  }
+
+  // Método de diagnóstico para buscar coincidencias directamente en la base de datos
+  async findPotentialMatches(depositId: string): Promise<any> {
+    console.log(`[DIAGNÓSTICO] Iniciando búsqueda detallada de coincidencias para depósito ID ${depositId}`);
+
+    try {
+      // Obtener el depósito específico
+      const deposit = await this.getTransactionById(depositId);
+
+      if (!deposit) {
+        return { status: 'error', message: `No se encontró depósito con ID ${depositId}` };
+      }
+
+      console.log(`[DIAGNÓSTICO] Depósito encontrado:`, {
+        id: deposit.id,
+        amount: deposit.amount,
+        email: deposit.payer_email,
+        office: deposit.office,
+        cbu: deposit.cbu,
+        date: deposit.date_created
+      });
+
+      // Buscar transacciones que coincidan en MONTO y EMAIL, sin importar otros criterios
+      const matches = await this.transactionRepository.createQueryBuilder('tx')
+        .where('tx.id != :id', { id: depositId })
+        .andWhere('tx.amount = :amount', { amount: deposit.amount })
+        .andWhere('tx.payerEmail = :email', { email: deposit.payer_email })
+        .getMany();
+
+      console.log(`[DIAGNÓSTICO] Encontradas ${matches.length} transacciones con mismo monto y email`);
+
+      // Convertir a formato Transaction
+      const mappedMatches = matches.map(entity => this.mapEntityToTransaction(entity));
+
+      // Análisis detallado de cada posible coincidencia
+      const detailedMatches = mappedMatches.map(match => {
+        // Verificar criterios uno por uno
+        const criteria = {
+          // Criterios básicos
+          type: {
+            match: match.type === 'deposit',
+            value: { expected: 'deposit', actual: match.type }
+          },
+          status: {
+            match: match.status === 'Pending',
+            value: { expected: 'Pending', actual: match.status }
+          },
+          amount: {
+            match: match.amount === deposit.amount,
+            value: { expected: deposit.amount, actual: match.amount }
+          },
+          office: {
+            match: match.office === deposit.office,
+            value: { expected: deposit.office, actual: match.office }
+          },
+          email: {
+            match: match.payer_email?.toLowerCase() === deposit.payer_email?.toLowerCase(),
+            value: { expected: deposit.payer_email, actual: match.payer_email }
+          },
+
+          // Criterios de validación de fecha
+          hasValidDates: {
+            match: !!(match.date_created && deposit.date_created),
+            value: { expected: true, actual: !!(match.date_created && deposit.date_created) }
+          },
+          dateCloseEnough: {
+            match: this.isDateCloseEnough(match.date_created, deposit.date_created),
+            value: { mpDate: match.date_created, depDate: deposit.date_created }
+          },
+
+          // Identificadores MP
+          hasMpIdentifiers: {
+            match: !!(match.payer_identification || match.receiver_id),
+            value: {
+              payer_id: match.payer_id,
+              receiver_id: match.receiver_id,
+              has_payer_ident: !!match.payer_identification
+            }
+          },
+
+          // Criterio para asegurar que no tenga ya una relación
+          noRelatedTransaction: {
+            match: !match.relatedUserTransactionId,
+            value: { expected: null, actual: match.relatedUserTransactionId }
+          }
+        };
+
+        // Determinar si cumple todos los criterios
+        const allCriteriaMet = Object.values(criteria).every(c => c.match);
+
+        return {
+          id: match.id,
+          allCriteriaMet,
+          criteria,
+          transaction: {
+            id: match.id,
+            type: match.type,
+            amount: match.amount,
+            status: match.status,
+            payer_email: match.payer_email,
+            office: match.office,
+            date_created: match.date_created,
+            receiver_id: match.receiver_id
+          }
+        };
+      });
+
+      return {
+        status: 'success',
+        deposit,
+        potentialMatches: detailedMatches,
+        summary: {
+          totalMatches: matches.length,
+          matchesMeetingAllCriteria: detailedMatches.filter(m => m.allCriteriaMet).length
+        }
+      };
+
+    } catch (error) {
+      console.error(`[DIAGNÓSTICO] Error al buscar coincidencias:`, error);
+      return {
+        status: 'error',
+        message: `Error al buscar coincidencias: ${error.message}`,
+        error: error
+      };
+    }
   }
 }
