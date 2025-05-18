@@ -282,7 +282,7 @@ export class IpnService implements OnModuleInit {
       description: entity.description,
       payment_method_id: entity.paymentMethodId,
       payer_id: entity.payerId,
-      payer_email: entity.payerEmail,
+      payer_email: entity.payerEmail || null,
       payer_identification: entity.payerIdentification,
       external_reference: entity.externalReference,
       cbu: entity.cbu,
@@ -295,8 +295,11 @@ export class IpnService implements OnModuleInit {
       account_name: entity.accountName,
     };
 
-    // Verificar el mapeo
-    console.log(`[MAP_ENTITY] Entidad → Transacción: accountName=${entity.accountName} → account_name=${mappedTransaction.account_name}`);
+    // Verificar el mapeo de payerEmail
+    console.log(`[MAP_ENTITY] Entidad ${entity.id} → Transacción: payerEmail=${entity.payerEmail} → payer_email=${mappedTransaction.payer_email}`);
+
+    // Verificar el mapeo de accountName
+    console.log(`[MAP_ENTITY] Entidad ${entity.id} → Transacción: accountName=${entity.accountName} → account_name=${mappedTransaction.account_name}`);
 
     return mappedTransaction;
   }
@@ -650,6 +653,9 @@ export class IpnService implements OnModuleInit {
     mpTransaction.office = officeFromAccount;
     mpTransaction.account_name = accountInfo?.name || 'No disponible';
 
+    // Log específico para verificar el email
+    console.log(`[IPN] ${mpTransaction.id}: IMPORTANTE - Email para la transacción MP: ${mpTransaction.payer_email}`);
+
     const savedMpTransaction = await this.saveTransaction(mpTransaction);
     console.log(`[IPN] DEPURACIÓN: Transacción MP guardada con los siguientes datos:`, {
       id: savedMpTransaction.id,
@@ -904,11 +910,14 @@ export class IpnService implements OnModuleInit {
       description: existingPendingOrAcceptedUserReport?.description || 'Depósito reportado por usuario, pendiente de validación',
       cbu: depositData.cbu,
       idCliente: depositData.idCliente,
-      payer_email: depositData.email,
+      payer_email: depositData.email, // Email del depositante
       external_reference: depositData.nombreDelTitular,
       office: depositData.idAgent,
       account_name: account_name // Asignar el nombre de cuenta
     };
+
+    // Log específico para verificar el email
+    console.log(`[${opId}] IMPORTANTE - Email para la transacción: ${userDepositTransaction.payer_email}`);
 
     if (existingPendingOrAcceptedUserReport?.status === 'Aceptado') {
       userDepositTransaction.status = 'Aceptado';
@@ -1256,7 +1265,7 @@ export class IpnService implements OnModuleInit {
           description: raw.transaction_description,
           payment_method_id: raw.transaction_paymentMethodId,
           payer_id: raw.transaction_payerId,
-          payer_email: raw.transaction_payerEmail,
+          payer_email: raw.transaction_payer_email || null, // Aseguramos que nunca sea undefined
           external_reference: raw.transaction_externalReference || raw.transaction_external_reference || null,
           cbu: raw.transaction_cbu,
           wallet_address: raw.transaction_walletAddress,
@@ -1268,6 +1277,13 @@ export class IpnService implements OnModuleInit {
           // Usar el nombre de cuenta del JOIN si está disponible, sino usar el guardado en accountName
           account_name: raw.account_name || raw.transaction_accountName || 'No disponible'
         };
+
+        // Log para depurar valor de payer_email
+        if (raw.transaction_payer_email) {
+          console.log(`[TRANSACTION_MAP] ID=${transaction.id}: Se encontró payer_email=${raw.transaction_payer_email}`);
+        } else {
+          console.log(`[TRANSACTION_MAP] ID=${transaction.id}: No se encontró payer_email en el resultado raw`);
+        }
 
         return transaction;
       });
@@ -1302,6 +1318,13 @@ export class IpnService implements OnModuleInit {
       // Mapear las entidades obtenidas al tipo Transaction
       const transactions = entities.map(entity => {
         const transaction = this.mapEntityToTransaction(entity);
+
+        // Log para depurar valor de payer_email desde entity
+        if (entity.payerEmail) {
+          console.log(`[ENTITY_MAP] ID=${transaction.id}: Se encontró entity.payerEmail=${entity.payerEmail}`);
+        } else {
+          console.log(`[ENTITY_MAP] ID=${transaction.id}: No se encontró payerEmail en la entidad`);
+        }
 
         // Si la transacción tiene CBU pero no tiene account_name, buscar el nombre
         if (transaction.cbu && !transaction.account_name) {
