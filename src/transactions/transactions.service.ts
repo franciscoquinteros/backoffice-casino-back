@@ -1350,7 +1350,7 @@ export class IpnService implements OnModuleInit {
 
           // Hacer el mismo proceso de matcheo que arriba
           await this.updateTransactionStatus(directMatch.id.toString(), 'Match');
-          await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Aceptado');
+          await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Match MP');
 
           await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
             referenceTransaction: directMatch.id.toString(),
