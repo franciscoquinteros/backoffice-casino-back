@@ -4,6 +4,7 @@ import { FindManyOptions, FindOneOptions, Repository } from 'typeorm';
 import { Account } from './entities/account.entity';
 import { CreateAccountDto, UpdateAccountDto } from './dto/account.dto';
 import { IpnService } from 'src/transactions/transactions.service';
+import { AccountDto } from './dto/account.dto';
 
 @Injectable()
 export class AccountService {
@@ -245,9 +246,9 @@ export class AccountService {
     console.log(`AccountService: Obteniendo siguiente CBU disponible para monto ${amount}${officeId ? ` en oficina ${officeId}` : ''}`);
 
     // Monto máximo por cuenta antes de rotar (en pesos)
-    const MAX_AMOUNT_PER_ACCOUNT = 300000;
+    const MAX_AMOUNT_PER_ACCOUNT = 100;
 
-    // Obtener todas las cuentas activas de MercadoPago ordenadas por acumulado
+    // Obtener todas las cuentas activas de MercadoPago ordenadas por ID (secuencial)
     const whereCondition: any = {
       wallet: 'mercadopago',
       status: 'active'
@@ -257,36 +258,32 @@ export class AccountService {
       whereCondition.agent = officeId;
     }
 
-    // Buscar cuentas ordenadas por monto acumulado (de menor a mayor)
+    // Buscar cuentas ordenadas por ID (orden secuencial)
     const accounts = await this.accountRepository.find({
       where: whereCondition,
-      order: { accumulated_amount: 'ASC' }
+      order: { id: 'ASC' }
     });
 
     if (!accounts || accounts.length === 0) {
       throw new NotFoundException(`No active MercadoPago accounts found${officeId ? ` for office ${officeId}` : ''}`);
     }
 
-    // Seleccionar la primera cuenta que tenga un monto acumulado menor a MAX_AMOUNT_PER_ACCOUNT
-    // Si todas superan el máximo, resetear los acumulados y usar la primera
+    // Buscar la primera cuenta que no haya superado el límite
     let selectedAccount = accounts.find(account =>
       Number(account.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT
     );
 
     // Si todas las cuentas superan el límite, resetear la primera para volver a empezar
     if (!selectedAccount && accounts.length > 0) {
-      selectedAccount = accounts[0];
+      selectedAccount = accounts[0]; // Tomar la primera cuenta (menor ID)
       console.log(`AccountService: Todas las cuentas superan el límite. Reseteando la cuenta ${selectedAccount.name} (ID: ${selectedAccount.id})`);
 
       // Resetear el monto acumulado de esta cuenta para reiniciar el ciclo
       selectedAccount.accumulated_amount = 0;
       await this.accountRepository.save(selectedAccount);
-    } else {
-      // Usar la cuenta con menor acumulado (ya seleccionada arriba)
-      selectedAccount = accounts[0];
     }
 
-    console.log(`AccountService: Seleccionado CBU ${selectedAccount.cbu} (Cuenta: ${selectedAccount.name}, Acumulado: ${selectedAccount.accumulated_amount})`);
+    console.log(`AccountService: Seleccionado CBU ${selectedAccount.cbu} (Cuenta: ${selectedAccount.name}, ID: ${selectedAccount.id}, Acumulado: ${selectedAccount.accumulated_amount})`);
 
     return selectedAccount.cbu;
   }
@@ -335,6 +332,21 @@ export class AccountService {
     await this.accountRepository.save(accounts);
 
     console.log(`AccountService: Montos acumulados reseteados para ${accounts.length} cuentas`);
+  }
+
+  /**
+   * Encuentra todas las cuentas para el superadmin (sin filtrar por oficina)
+   * @returns Todas las cuentas en el sistema
+   */
+  async findAllForSuperadmin(): Promise<AccountDto[]> {
+    try {
+      console.log('[AccountService] findAllForSuperadmin: Buscando todas las cuentas');
+      const accounts = await this.accountRepository.find();
+      return accounts.map(account => new AccountDto(account));
+    } catch (error) {
+      console.error('[AccountService] findAllForSuperadmin error:', error);
+      throw new Error('Error al obtener todas las cuentas');
+    }
   }
 
 }

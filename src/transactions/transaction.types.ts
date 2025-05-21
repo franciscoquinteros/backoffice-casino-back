@@ -42,6 +42,7 @@ export interface Transaction {
   relatedUserTransactionId?: string;
   office?: string;
   account_name?: string;
+  assignedTo?: string;
 }
 
 export class TransactionDto {

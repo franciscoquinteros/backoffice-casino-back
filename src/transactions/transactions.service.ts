@@ -344,6 +344,8 @@ export class IpnService implements OnModuleInit {
     // CRÍTICO: Asegurarse de asignar account_name a accountName (la columna de BD)
     entity.accountName = transaction.account_name || null;
 
+    // Asignar el valor de assignedTo
+
     console.log(`[MAP_TO_ENTITY] Mapeando transaction.account_name=${transaction.account_name} a entity.accountName=${entity.accountName}`);
 
     return entity;
@@ -848,8 +850,8 @@ export class IpnService implements OnModuleInit {
         // 1. La transacción MP queda en "Pending"
         await this.updateTransactionStatus(savedMpTransaction.id.toString(), 'Match');
 
-        // 2. Cambiar el depósito externo a "Aceptado"
-        await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Aceptado');
+        // 2. Cambiar el depósito externo a "Match MP"
+        await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Match MP');
 
         // 3. Añadir referencias cruzadas entre ambas transacciones
         await this.updateTransactionInfo(matchingExternalDeposit.id.toString(), {
@@ -1234,8 +1236,8 @@ export class IpnService implements OnModuleInit {
       // 1. La transacción MP queda en "Pending"
       await this.updateTransactionStatus(matchingTransaction.id.toString(), 'Match');
 
-      // 2. Cambiar el depósito externo a "Aceptado"
-      await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Aceptado');
+      // 2. Cambiar el depósito externo a "Match MP"
+      await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Match MP');
 
       // 3. Añadir referencias cruzadas entre ambas transacciones
       await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
@@ -1568,15 +1570,11 @@ export class IpnService implements OnModuleInit {
 
         // Log para depurar valor de payer_email
         if (raw.transaction_payerEmail || raw.transaction_payer_email) {
-          console.log(`[getTransactions] ID=${transaction.id}: Email encontrado=${raw.transaction_payerEmail || raw.transaction_payer_email}`);
         } else {
           // Mostrar todas las keys que tienen "email" o "payer" en su nombre
           const emailKeys = Object.keys(raw).filter(k => k.toLowerCase().includes('email') || k.toLowerCase().includes('payer'));
           if (emailKeys.length > 0) {
-            console.log(`[getTransactions] ID=${transaction.id}: Campos relacionados con email:`,
-              emailKeys.reduce((obj, key) => ({ ...obj, [key]: raw[key] }), {}));
           } else {
-            console.log(`[getTransactions] ID=${transaction.id}: NO se encontraron campos relacionados con email`);
           }
         }
 
@@ -2023,5 +2021,10 @@ export class IpnService implements OnModuleInit {
         error: error
       };
     }
+  }
+
+  // Método para obtener una referencia al AccountService
+  getAccountService(): AccountService {
+    return this.accountService;
   }
 }

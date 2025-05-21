@@ -74,4 +74,5 @@ export class TransactionEntity {
 
     @Column({ name: 'account_name', nullable: true })
     accountName: string;
+
 }

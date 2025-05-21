@@ -2,7 +2,7 @@ import {
   Body, Controller, Get, Post, Param, Patch, Delete,
   UseInterceptors, ClassSerializerInterceptor, HttpCode, HttpStatus,
   Query, NotFoundException, UseGuards, // <-- Importa UseGuards
-  Req, ForbiddenException, ParseIntPipe // <-- Importa Req, ForbiddenException, ParseIntPipe
+  Req, ForbiddenException, ParseIntPipe, BadRequestException // <-- Importa Req, ForbiddenException, ParseIntPipe, BadRequestException
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiParam } from '@nestjs/swagger'; // <-- Importa ApiBearerAuth, ApiParam
 import { CreateUserDto } from './dto/create-user.dto';
@@ -35,6 +35,36 @@ export class UserController {
   constructor(
     private readonly userService: UserService
   ) { }
+
+  // IMPORTANTE: Colocamos el endpoint 'all' antes que otros endpoints con parámetros
+  // para evitar que NestJS interprete 'all' como un parámetro
+  @Get('all')
+  @ApiOperation({ summary: 'Get all users from all offices (superadmin only)' })
+  @ApiResponse({ status: 200, description: 'List of all users in the system', type: [UserResponseDto] })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
+  @ApiResponse({ status: 403, description: 'Forbidden - User is not a superadmin' })
+  async getAllUsers(
+    @Req() request: RequestWithUser
+  ): Promise<UserResponseDto[]> {
+    // Verificar si el usuario es superadmin
+    const user = request.user;
+    console.log('GET /users/all - Usuario autenticado:', user);
+
+    if (!user) {
+      console.error('GET /users/all - No hay usuario autenticado');
+      throw new ForbiddenException('Usuario no autenticado');
+    }
+
+    if (user.role !== 'superadmin') {
+      console.error(`GET /users/all - Usuario ${user.id} con rol ${user.role} intentó acceder a todos los usuarios`);
+      throw new ForbiddenException('Sólo los superadmins pueden acceder a todos los usuarios');
+    }
+
+    console.log(`[UserController] getAllUsers: Obteniendo todos los usuarios para superadmin ${user.id}`);
+    const users = await this.userService.findAll();
+    console.log(`Se encontraron ${users.length} usuarios en total`);
+    return users.map(user => new UserResponseDto(user));
+  }
 
   // check-status podría quedar fuera del guard si es necesario que sea público
   // Si no, quitar esta línea y hereda el guard de la clase.
@@ -102,7 +132,7 @@ export class UserController {
     if (!targetUser) { throw new NotFoundException(`User with ID ${id} not found`); }
 
     // Autorización: ¿Está el usuario solicitado en la misma oficina que quien pregunta? (O es admin?)
-    if (targetUser.office !== requestingUser.office /* && requestingUser.role !== 'superadmin' */) {
+    if (targetUser.office !== requestingUser.office && requestingUser.role !== 'superadmin') {
       throw new ForbiddenException("Cannot access users from other offices.");
     }
 
@@ -129,13 +159,13 @@ export class UserController {
 
     // 2. Autorización: ¿El usuario que actualiza es de la misma oficina que el usuario a actualizar?
     //    (O es admin, o quizás un usuario solo puede actualizarse a sí mismo - añade lógica según necesites)
-    if (targetUser.office !== requestingUser.office /* && requestingUser.role !== 'superadmin' && requestingUser.id !== targetUser.id */) {
+    if (targetUser.office !== requestingUser.office && requestingUser.role !== 'superadmin' && requestingUser.id !== targetUser.id) {
       console.warn(`Forbidden: User ${requestingUser.id} (Office: ${requestingUser.office}) attempted to update user ${id} from office ${targetUser.office}.`);
       throw new ForbiddenException("Cannot update users from other offices.");
     }
 
     // Cuidado extra si se intenta cambiar la oficina
-    if (updateUserDto.office && updateUserDto.office !== targetUser.office /* && requestingUser.role !== 'superadmin'*/) {
+    if (updateUserDto.office && updateUserDto.office !== targetUser.office && requestingUser.role !== 'superadmin') {
       throw new ForbiddenException("Insufficient permissions to change user's office.");
     }
 
@@ -161,7 +191,7 @@ export class UserController {
     if (!targetUser) { throw new NotFoundException(`User with ID ${id} not found`); }
 
     // Autorización (ej: misma oficina o es el propio usuario)
-    if (targetUser.office !== requestingUser.office && targetUser.id !== requestingUser.id /* && requestingUser.role !== 'superadmin' */) {
+    if (targetUser.office !== requestingUser.office && targetUser.id !== requestingUser.id && requestingUser.role !== 'superadmin') {
       throw new ForbiddenException("Cannot change password for this user.");
     }
 

@@ -1257,7 +1257,8 @@ export class ReportService {
         const statusMap: Record<string, number> = {
             'Aceptado': 0,
             'Rechazado': 0,
-            'Pendiente': 0
+            'Pendiente': 0,
+            'Match MP': 0
         };
         transactions.forEach(tx => {
             // Normaliza el estado para que coincida con los tres permitidos
@@ -1265,6 +1266,7 @@ export class ReportService {
             if (status === 'aceptado' || status === 'approved') status = 'Aceptado';
             else if (status === 'rechazado' || status === 'rejected' || status === 'error') status = 'Rechazado';
             else if (status === 'pendiente' || status === 'pending') status = 'Pendiente';
+            else if (status === 'match mp') status = 'Match MP';
             else return; // Ignora otros estados
             statusMap[status] = (statusMap[status] || 0) + 1;
         });
