@@ -356,9 +356,16 @@ export class IpnService implements OnModuleInit {
   // En IpnService (transactions.service.ts)
   async saveTransaction(transaction: Transaction): Promise<Transaction> {
     try {
-      // Si la transacción tiene CBU pero no tiene account_name, intentamos buscar el nombre
-      // Para "Bank Transfer" siempre buscar el nombre actualizado, incluso si ya tiene uno asignado
-      if (transaction.cbu && (transaction.description === 'Bank Transfer' || !transaction.account_name)) {
+      // Si la transacción tiene CBU pero no tiene account_name válido, intentamos buscar el nombre
+      // IMPORTANTE: Solo buscar si account_name es vacío, null, undefined o "No disponible"
+      const needsAccountNameUpdate = transaction.cbu &&
+        (!transaction.account_name ||
+          transaction.account_name === 'No disponible' ||
+          transaction.account_name.trim() === '');
+
+      if (needsAccountNameUpdate) {
+        console.log(`[SAVE_TX] Buscando nombre de cuenta porque: account_name="${transaction.account_name}", description="${transaction.description}", CBU="${transaction.cbu}"`);
+
         // Buscar en memoria primero
         const accountByCbu = this.accounts.find(acc =>
           acc.cbu === transaction.cbu &&
@@ -386,6 +393,8 @@ export class IpnService implements OnModuleInit {
             transaction.account_name = 'No disponible';
           }
         }
+      } else {
+        console.log(`[SAVE_TX] Preservando account_name existente: "${transaction.account_name}" (CBU: ${transaction.cbu})`);
       }
 
       // Hacer un log detallado antes de guardar
