@@ -9,7 +9,9 @@ import {
   ForbiddenException,
   Req,
   BadRequestException,
-  Put
+  Put,
+  Body,
+  Query
 } from '@nestjs/common';
 import {
   ApiOperation,
@@ -44,6 +46,48 @@ export class TransactionsController {
   private processingTransactions = new Set<string>();
 
   constructor(private readonly ipnService: IpnService) { }
+
+  // Función helper para calcular rangos de fechas
+  private getDateRange(period?: string, from?: string, to?: string): { startDate: Date; endDate: Date } {
+    const now = new Date();
+    const endDate = new Date();
+    let startDate: Date;
+
+    if (period === 'custom' && from && to) {
+      startDate = new Date(from);
+      endDate.setTime(new Date(to).getTime());
+      endDate.setHours(23, 59, 59, 999); // Fin del día
+    } else if (period === 'day') {
+      // Hoy
+      startDate = new Date();
+      startDate.setHours(0, 0, 0, 0);
+      endDate.setHours(23, 59, 59, 999);
+    } else if (period === 'week') {
+      // Esta semana (desde lunes)
+      startDate = new Date();
+      const day = startDate.getDay();
+      const diff = startDate.getDate() - day + (day === 0 ? -6 : 1); // Ajustar para que lunes sea el primer día
+      startDate.setDate(diff);
+      startDate.setHours(0, 0, 0, 0);
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      // month (por defecto)
+      startDate = new Date();
+      startDate.setDate(1);
+      startDate.setHours(0, 0, 0, 0);
+      endDate.setHours(23, 59, 59, 999);
+    }
+
+    return { startDate, endDate };
+  }
+
+  // Función helper para filtrar transacciones por fecha
+  private filterTransactionsByDate(transactions: any[], startDate: Date, endDate: Date): any[] {
+    return transactions.filter(tx => {
+      const txDate = new Date(tx.date_created || tx.dateCreated || tx.createdAt);
+      return txDate >= startDate && txDate <= endDate;
+    });
+  }
 
   @Get('all')
   @ApiOperation({ summary: 'Get all transactions from all offices (superadmin only)' })
@@ -427,7 +471,12 @@ export class TransactionsController {
   @ApiResponse({ status: 200, description: 'Transaction statistics by office or global' })
   @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
   @ApiResponse({ status: 403, description: 'Forbidden - User is not a superadmin' })
-  async getTransactionStats(@Req() request: RequestWithUser): Promise<any> {
+  async getTransactionStats(
+    @Req() request: RequestWithUser,
+    @Query('period') period?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string
+  ): Promise<any> {
     const user = request.user;
 
     // Verificar si el usuario es superadmin
@@ -439,61 +488,54 @@ export class TransactionsController {
       throw new ForbiddenException('Solo los superadmins pueden acceder a las estadísticas globales');
     }
 
-    // Obtener todas las transacciones (o podríamos implementar una función más eficiente en el servicio)
+    // Obtener todas las transacciones
     const allTransactions = await this.ipnService.getTransactions();
 
-    // Obtener solo transacciones del último mes para algunos cálculos
+    // Aplicar filtro de fecha si se especifica
+    const { startDate, endDate } = this.getDateRange(period, from, to);
+    console.log(`Filtering transactions from ${startDate.toISOString()} to ${endDate.toISOString()}`);
+
+    const filteredTransactions = this.filterTransactionsByDate(allTransactions, startDate, endDate);
+    console.log(`Filtered ${allTransactions.length} transactions to ${filteredTransactions.length} for period: ${period || 'month'}`);
+
+    // Obtener solo transacciones del último mes para comparación de tendencias
     const oneMonthAgo = new Date();
     oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
 
-    // Calcular estadísticas
+    // Calcular estadísticas con transacciones filtradas
     const stats = {
       // Totales generales
-      totalTransactions: allTransactions.length,
-      totalAmount: allTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0),
+      totalTransactions: filteredTransactions.length,
+      totalAmount: filteredTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0),
 
       // Desglose por tipo
       deposits: {
-        total: allTransactions.filter(tx => tx.type === 'deposit').length,
-        amount: allTransactions.filter(tx => tx.type === 'deposit').reduce((sum, tx) => sum + (tx.amount || 0), 0),
-        pending: allTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Pending').length,
-        accepted: allTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Aceptado').length,
-        rejected: allTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Rechazado').length
+        total: filteredTransactions.filter(tx => tx.type === 'deposit').length,
+        amount: filteredTransactions.filter(tx => tx.type === 'deposit').reduce((sum, tx) => sum + (tx.amount || 0), 0),
+        pending: filteredTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Pending').length,
+        accepted: filteredTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Aceptado').length,
+        rejected: filteredTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Rechazado').length
       },
 
       withdrawals: {
-        total: allTransactions.filter(tx => tx.type === 'withdraw').length,
-        amount: allTransactions.filter(tx => tx.type === 'withdraw').reduce((sum, tx) => sum + (tx.amount || 0), 0),
-        pending: allTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Pending').length,
-        accepted: allTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').length,
-        rejected: allTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Rechazado').length
+        total: filteredTransactions.filter(tx => tx.type === 'withdraw').length,
+        amount: filteredTransactions.filter(tx => tx.type === 'withdraw').reduce((sum, tx) => sum + (tx.amount || 0), 0),
+        pending: filteredTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Pending').length,
+        accepted: filteredTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').length,
+        rejected: filteredTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Rechazado').length
       },
+
+      // Total neto (depósitos - retiros)
+      netTotal: 0,
 
       // Estadísticas por oficina
       byOffice: {},
 
-      // Actividad reciente (últimas 5 transacciones)
-      recentActivity: allTransactions
-        .sort((a, b) => new Date(b.date_created || 0).getTime() - new Date(a.date_created || 0).getTime())
-        .slice(0, 5)
-        .map(tx => ({
-          id: tx.id,
-          type: tx.type,
-          amount: tx.amount,
-          status: tx.status,
-          date_created: tx.date_created,
-          office: tx.office
-        })),
-
-      // Tendencia mensual (comparación con el mes anterior)
+      // Tendencia mensual (usando el período filtrado como "actual" y comparando con período anterior del mismo tamaño)
       monthlyTrend: {
         currentMonth: {
-          count: allTransactions.filter(tx =>
-            new Date(tx.date_created || 0) >= oneMonthAgo
-          ).length,
-          amount: allTransactions
-            .filter(tx => new Date(tx.date_created || 0) >= oneMonthAgo)
-            .reduce((sum, tx) => sum + (tx.amount || 0), 0)
+          count: filteredTransactions.length,
+          amount: filteredTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0)
         },
         previousMonth: {
           count: 0,
@@ -504,11 +546,14 @@ export class TransactionsController {
       }
     };
 
-    // Calcular estadísticas por oficina
-    const offices = [...new Set(allTransactions.map(tx => tx.office))].filter(Boolean);
+    // Calcular el total neto (depósitos - retiros)
+    stats.netTotal = stats.deposits.amount - stats.withdrawals.amount;
+
+    // Calcular estadísticas por oficina (solo del período filtrado)
+    const offices = [...new Set(filteredTransactions.map(tx => tx.office))].filter(Boolean);
 
     offices.forEach(office => {
-      const officeTransactions = allTransactions.filter(tx => tx.office === office);
+      const officeTransactions = filteredTransactions.filter(tx => tx.office === office);
       stats.byOffice[office] = {
         total: officeTransactions.length,
         totalAmount: officeTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0),
@@ -523,31 +568,29 @@ export class TransactionsController {
       };
     });
 
-    // Calcular tendencia (cambio porcentual respecto al mes anterior)
-    const twoMonthsAgo = new Date();
-    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+    // Calcular período anterior del mismo tamaño para comparación
+    const periodDuration = endDate.getTime() - startDate.getTime();
+    const previousPeriodEnd = new Date(startDate.getTime() - 1); // Un milisegundo antes del período actual
+    const previousPeriodStart = new Date(previousPeriodEnd.getTime() - periodDuration);
 
-    const previousMonthTransactions = allTransactions.filter(tx =>
-      new Date(tx.date_created || 0) >= twoMonthsAgo &&
-      new Date(tx.date_created || 0) < oneMonthAgo
-    );
+    const previousPeriodTransactions = this.filterTransactionsByDate(allTransactions, previousPeriodStart, previousPeriodEnd);
 
     stats.monthlyTrend.previousMonth = {
-      count: previousMonthTransactions.length,
-      amount: previousMonthTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0)
+      count: previousPeriodTransactions.length,
+      amount: previousPeriodTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0)
     };
 
     // Calcular porcentajes de cambio
     if (stats.monthlyTrend.previousMonth.count > 0) {
       stats.monthlyTrend.countChange = ((stats.monthlyTrend.currentMonth.count - stats.monthlyTrend.previousMonth.count) / stats.monthlyTrend.previousMonth.count) * 100;
     } else {
-      stats.monthlyTrend.countChange = 100; // Si no había datos previos, el crecimiento es 100%
+      stats.monthlyTrend.countChange = stats.monthlyTrend.currentMonth.count > 0 ? 100 : 0;
     }
 
     if (stats.monthlyTrend.previousMonth.amount > 0) {
       stats.monthlyTrend.amountChange = ((stats.monthlyTrend.currentMonth.amount - stats.monthlyTrend.previousMonth.amount) / stats.monthlyTrend.previousMonth.amount) * 100;
     } else {
-      stats.monthlyTrend.amountChange = 100; // Si no había datos previos, el crecimiento es 100%
+      stats.monthlyTrend.amountChange = stats.monthlyTrend.currentMonth.amount > 0 ? 100 : 0;
     }
 
     return stats;
@@ -560,7 +603,10 @@ export class TransactionsController {
   @ApiResponse({ status: 403, description: 'Forbidden - User cannot access this office data' })
   async getOfficeTransactionStats(
     @Param('officeId') officeId: string,
-    @Req() request: RequestWithUser
+    @Req() request: RequestWithUser,
+    @Query('period') period?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string
   ): Promise<any> {
     const user = request.user;
 
@@ -575,9 +621,16 @@ export class TransactionsController {
     }
 
     // Obtener transacciones filtradas por oficina
-    const officeTransactions = await this.ipnService.getTransactions(officeId);
+    const allOfficeTransactions = await this.ipnService.getTransactions(officeId);
 
-    // Obtener solo transacciones del último mes para algunos cálculos
+    // Aplicar filtro de fecha si se especifica
+    const { startDate, endDate } = this.getDateRange(period, from, to);
+    console.log(`Filtering office ${officeId} transactions from ${startDate.toISOString()} to ${endDate.toISOString()}`);
+
+    const officeTransactions = this.filterTransactionsByDate(allOfficeTransactions, startDate, endDate);
+    console.log(`Filtered ${allOfficeTransactions.length} office transactions to ${officeTransactions.length} for period: ${period || 'month'}`);
+
+    // Obtener solo transacciones del último mes para comparación de tendencias
     const oneMonthAgo = new Date();
     oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
 
@@ -605,27 +658,14 @@ export class TransactionsController {
         rejected: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Rechazado').length
       },
 
-      // Actividad reciente (últimas 5 transacciones)
-      recentActivity: officeTransactions
-        .sort((a, b) => new Date(b.date_created || 0).getTime() - new Date(a.date_created || 0).getTime())
-        .slice(0, 5)
-        .map(tx => ({
-          id: tx.id,
-          type: tx.type,
-          amount: tx.amount,
-          status: tx.status,
-          date_created: tx.date_created
-        })),
+      // Total neto (depósitos - retiros)
+      netTotal: 0,
 
-      // Tendencia mensual (comparación con el mes anterior)
+      // Tendencia mensual (usando el período filtrado como "actual" y comparando con período anterior del mismo tamaño)
       monthlyTrend: {
         currentMonth: {
-          count: officeTransactions.filter(tx =>
-            new Date(tx.date_created || 0) >= oneMonthAgo
-          ).length,
-          amount: officeTransactions
-            .filter(tx => new Date(tx.date_created || 0) >= oneMonthAgo)
-            .reduce((sum, tx) => sum + (tx.amount || 0), 0)
+          count: officeTransactions.length,
+          amount: officeTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0)
         },
         previousMonth: {
           count: 0,
@@ -636,31 +676,32 @@ export class TransactionsController {
       }
     };
 
-    // Calcular tendencia (cambio porcentual respecto al mes anterior)
-    const twoMonthsAgo = new Date();
-    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+    // Calcular el total neto (depósitos - retiros)
+    stats.netTotal = stats.deposits.amount - stats.withdrawals.amount;
 
-    const previousMonthTransactions = officeTransactions.filter(tx =>
-      new Date(tx.date_created || 0) >= twoMonthsAgo &&
-      new Date(tx.date_created || 0) < oneMonthAgo
-    );
+    // Calcular período anterior del mismo tamaño para comparación
+    const periodDuration = endDate.getTime() - startDate.getTime();
+    const previousPeriodEnd = new Date(startDate.getTime() - 1); // Un milisegundo antes del período actual
+    const previousPeriodStart = new Date(previousPeriodEnd.getTime() - periodDuration);
+
+    const previousPeriodTransactions = this.filterTransactionsByDate(allOfficeTransactions, previousPeriodStart, previousPeriodEnd);
 
     stats.monthlyTrend.previousMonth = {
-      count: previousMonthTransactions.length,
-      amount: previousMonthTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0)
+      count: previousPeriodTransactions.length,
+      amount: previousPeriodTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0)
     };
 
     // Calcular porcentajes de cambio
     if (stats.monthlyTrend.previousMonth.count > 0) {
       stats.monthlyTrend.countChange = ((stats.monthlyTrend.currentMonth.count - stats.monthlyTrend.previousMonth.count) / stats.monthlyTrend.previousMonth.count) * 100;
     } else {
-      stats.monthlyTrend.countChange = 100; // Si no había datos previos, el crecimiento es 100%
+      stats.monthlyTrend.countChange = stats.monthlyTrend.currentMonth.count > 0 ? 100 : 0;
     }
 
     if (stats.monthlyTrend.previousMonth.amount > 0) {
       stats.monthlyTrend.amountChange = ((stats.monthlyTrend.currentMonth.amount - stats.monthlyTrend.previousMonth.amount) / stats.monthlyTrend.previousMonth.amount) * 100;
     } else {
-      stats.monthlyTrend.amountChange = 100; // Si no había datos previos, el crecimiento es 100%
+      stats.monthlyTrend.amountChange = stats.monthlyTrend.currentMonth.amount > 0 ? 100 : 0;
     }
 
     return stats;
@@ -749,14 +790,18 @@ export class TransactionsController {
       throw new HttpException(`Transaction with ID ${transactionId} not found`, HttpStatus.NOT_FOUND);
     }
 
-    // Para transacciones "Bank Transfer", obtener el nombre de cuenta directamente de la BD
+    // Para transacciones "Bank Transfer", SIEMPRE obtener el nombre de cuenta más actualizado de la BD
     if (transaction.description === 'Bank Transfer' && transaction.cbu) {
       try {
+        console.log(`[TransactionsController] Bank Transfer ${transactionId}: Buscando nombre de cuenta actualizado para CBU ${transaction.cbu}`);
+
         // Intentar obtener cuenta por CBU para tener el nombre actualizado
         const accountService = this.ipnService.getAccountService();
         const account = await accountService.findByCbu(transaction.cbu);
 
         if (account && account.name) {
+          console.log(`[TransactionsController] Bank Transfer ${transactionId}: Nombre de cuenta encontrado en BD: "${account.name}" (anterior: "${transaction.account_name}")`);
+
           // Actualizar account_name con el valor más reciente de la base de datos
           transaction.account_name = account.name;
 
@@ -765,15 +810,241 @@ export class TransactionsController {
             accountName: account.name
           });
 
-          console.log(`[TransactionsController] Updated account_name for transaction ${transactionId} to "${account.name}"`);
+          console.log(`[TransactionsController] Bank Transfer ${transactionId}: Actualizado account_name a "${account.name}" en BD`);
+        } else {
+          console.log(`[TransactionsController] No se encontró cuenta en BD para Bank Transfer ${transactionId} con CBU ${transaction.cbu}`);
         }
       } catch (error) {
-        console.error(`[TransactionsController] Error fetching account name for transaction ${transactionId}:`, error);
+        console.error(`[TransactionsController] Error fetching account name for Bank Transfer ${transactionId}:`, error);
       }
     }
 
-    console.log(`[TransactionsController] Returning transaction details for ${transactionId}: ${JSON.stringify(transaction)}`);
+    console.log(`[TransactionsController] Returning transaction details for ${transactionId} with account_name: "${transaction.account_name}"`);
 
     return transaction;
+  }
+
+  @Post('refresh-account-names')
+  @ApiOperation({ summary: 'Refresh account names for Bank Transfer transactions' })
+  @ApiResponse({ status: 200, description: 'Account names refreshed successfully' })
+  async refreshBankTransferAccountNames(
+    @Req() request: RequestWithUser
+  ): Promise<{ status: string; message: string; updated: number }> {
+    console.log('[TransactionController] Iniciando actualización de nombres de cuentas para transacciones Bank Transfer');
+
+    try {
+      // Buscar todas las transacciones con descripción "Bank Transfer"
+      const transactions = await this.ipnService.getTransactions(
+        undefined, // No filtrar por officeid
+        'deposit', // Solo depósitos
+        undefined  // No filtrar por estado
+      );
+
+      const bankTransfers = transactions.filter(tx => tx.description === 'Bank Transfer');
+      console.log(`[TransactionController] Encontradas ${bankTransfers.length} transacciones Bank Transfer para actualizar`);
+
+      let updatedCount = 0;
+      const accountService = this.ipnService.getAccountService();
+      const accountCache = new Map<string, string>();
+
+      // Procesar cada transacción Bank Transfer
+      for (const tx of bankTransfers) {
+        if (tx.cbu) {
+          try {
+            // Primero verificar si ya tenemos este CBU en caché
+            let accountName = accountCache.get(tx.cbu);
+
+            // Si no está en caché, buscarlo en la BD
+            if (!accountName) {
+              const account = await accountService.findByCbu(tx.cbu);
+              if (account && account.name) {
+                accountName = account.name;
+                accountCache.set(tx.cbu, accountName);
+              }
+            }
+
+            if (accountName) {
+              // Actualizar la transacción siempre, forzando la actualización 
+              // aunque el nombre no parezca haber cambiado
+              await this.ipnService.updateTransactionInfo(tx.id.toString(), {
+                accountName: accountName
+              });
+              updatedCount++;
+              console.log(`[RefreshNames] Actualizado nombre para tx ${tx.id}: "${tx.account_name || 'N/A'}" -> "${accountName}"`);
+            } else {
+              console.log(`[RefreshNames] No se encontró nombre para CBU ${tx.cbu} de tx ${tx.id}`);
+            }
+          } catch (err) {
+            console.error(`[RefreshNames] Error al actualizar tx ${tx.id}:`, err);
+          }
+        } else {
+          console.log(`[RefreshNames] La transacción ${tx.id} no tiene CBU asociado`);
+        }
+      }
+
+      return {
+        status: 'success',
+        message: `Se actualizaron ${updatedCount} de ${bankTransfers.length} transacciones Bank Transfer`,
+        updated: updatedCount
+      };
+    } catch (error) {
+      console.error('[RefreshNames] Error al actualizar nombres de cuenta:', error);
+      throw new HttpException('Error al actualizar nombres de cuenta', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Post('update-all-account-names')
+  @ApiOperation({ summary: 'Update ALL existing Bank Transfer transactions with current account names (RETROACTIVE)' })
+  @ApiResponse({ status: 200, description: 'All Bank Transfer account names updated successfully' })
+  async updateAllBankTransferAccountNames(
+    @Req() request: RequestWithUser
+  ): Promise<{ status: string; message: string; updated: number; details: any[] }> {
+    const user = request.user;
+
+    // Solo permitir a superadmins realizar esta operación masiva
+    if (user?.role !== 'superadmin') {
+      throw new ForbiddenException('Solo los superadmins pueden realizar actualizaciones masivas');
+    }
+
+    console.log('[TransactionController] INICIO: Actualización masiva retroactiva de nombres de cuenta para Bank Transfer');
+
+    try {
+      // Obtener TODAS las transacciones Bank Transfer de la BD directamente
+      const bankTransferEntities = await this.ipnService.getTransactionRepository().find({
+        where: {
+          description: 'Bank Transfer'
+        }
+      });
+
+      console.log(`[UpdateAll] Encontradas ${bankTransferEntities.length} transacciones Bank Transfer en total`);
+
+      let updatedCount = 0;
+      const updateDetails = [];
+      const accountService = this.ipnService.getAccountService();
+      const accountCache = new Map<string, string>();
+
+      // Procesar cada transacción
+      for (const entity of bankTransferEntities) {
+        if (entity.cbu) {
+          try {
+            // Obtener el nombre actual de la cuenta
+            let currentAccountName = accountCache.get(entity.cbu);
+
+            if (!currentAccountName) {
+              const account = await accountService.findByCbu(entity.cbu);
+              if (account && account.name) {
+                currentAccountName = account.name;
+                accountCache.set(entity.cbu, currentAccountName);
+              }
+            }
+
+            if (currentAccountName) {
+              const oldName = entity.accountName;
+
+              // Solo actualizar si el nombre es diferente
+              if (oldName !== currentAccountName) {
+                // Actualizar directamente en la BD
+                await this.ipnService.getTransactionRepository().update(
+                  { id: entity.id },
+                  { accountName: currentAccountName }
+                );
+
+                updatedCount++;
+                updateDetails.push({
+                  transactionId: entity.id,
+                  cbu: entity.cbu,
+                  oldName: oldName || 'Sin nombre',
+                  newName: currentAccountName
+                });
+
+                console.log(`[UpdateAll] TX ${entity.id}: "${oldName || 'Sin nombre'}" -> "${currentAccountName}"`);
+              } else {
+                console.log(`[UpdateAll] TX ${entity.id}: Nombre ya correcto: "${currentAccountName}"`);
+              }
+            } else {
+              console.log(`[UpdateAll] TX ${entity.id}: No se encontró cuenta para CBU ${entity.cbu}`);
+            }
+          } catch (err) {
+            console.error(`[UpdateAll] Error al procesar TX ${entity.id}:`, err);
+          }
+        } else {
+          console.log(`[UpdateAll] TX ${entity.id}: No tiene CBU asociado`);
+        }
+      }
+
+      console.log(`[UpdateAll] COMPLETADO: Se actualizaron ${updatedCount} transacciones`);
+
+      return {
+        status: 'success',
+        message: `Actualización masiva completada: ${updatedCount} de ${bankTransferEntities.length} transacciones Bank Transfer actualizadas`,
+        updated: updatedCount,
+        details: updateDetails.slice(0, 10) // Solo mostrar los primeros 10 para no sobrecargar la respuesta
+      };
+    } catch (error) {
+      console.error('[UpdateAll] Error en actualización masiva:', error);
+      throw new HttpException('Error en actualización masiva de nombres de cuenta', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Put(':id/status')
+  @ApiOperation({ summary: 'Update transaction status' })
+  @ApiParam({ name: 'id', required: true, description: 'ID of the transaction to update', type: String })
+  @ApiResponse({ status: 200, description: 'Transaction status updated successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Transaction not found' })
+  async updateTransactionStatus(
+    @Param('id') transactionId: string,
+    @Req() request: RequestWithUser,
+    @Body() body: { status: string }
+  ): Promise<{ status: string; message: string; transaction: Transaction }> {
+    const userId = request.user?.id;
+    const userOffice = request.user?.office;
+
+    console.log(`[UpdateStatus] User ${userId} updating status of transaction ${transactionId} to ${body.status}`);
+
+    if (!userOffice) {
+      throw new ForbiddenException('User office information is missing.');
+    }
+
+    try {
+      const transaction = await this.ipnService.getTransactionById(transactionId);
+      if (!transaction) {
+        throw new HttpException('Transaction not found', HttpStatus.NOT_FOUND);
+      }
+
+      const transactionOffice = transaction.office;
+
+      if (!transactionOffice) {
+        throw new ForbiddenException('Transaction is not assigned to an office.');
+      }
+
+      if (userOffice !== transactionOffice) {
+        console.warn(`[UpdateStatus] FORBIDDEN: User ${userId} (Office: ${userOffice}) attempted action on transaction ${transactionId} from office ${transactionOffice}.`);
+        throw new ForbiddenException(`Forbidden action on transaction from office ${transactionOffice}.`);
+      }
+
+      // Validar que el nuevo estado sea válido
+      const validStatuses = ['Pending', 'Asignado', 'Aceptado', 'Rechazado', 'Match', 'Match MP'];
+      if (!validStatuses.includes(body.status)) {
+        throw new HttpException(`Invalid status: ${body.status}`, HttpStatus.BAD_REQUEST);
+      }
+
+      const updatedTransaction = await this.ipnService.updateTransactionStatus(transactionId, body.status);
+      if (!updatedTransaction) {
+        throw new HttpException('Failed to update transaction status', HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      return {
+        status: 'success',
+        message: `Transaction status updated to ${body.status}`,
+        transaction: updatedTransaction
+      };
+    } catch (error) {
+      console.error(`[UpdateStatus] Error updating transaction ${transactionId}:`, error);
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException('Error updating transaction status', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
   }
 }

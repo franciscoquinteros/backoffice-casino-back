@@ -16,7 +16,7 @@ interface AuthenticatedUser {
     email?: string;
 }
 
-interface RequestWithUser extends Request {
+interface AuthenticatedRequest extends Request {
     user?: AuthenticatedUser;
 }
 
@@ -33,9 +33,8 @@ export class AccountController {
     @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
     @ApiResponse({ status: 403, description: 'Forbidden - User is not a superadmin' })
     async getAllAccounts(
-        @Req() request: RequestWithUser
+        @Req() request: AuthenticatedRequest
     ): Promise<AccountsResponseDto> {
-        // Verificar si el usuario es superadmin
         const user = request.user;
         console.log('GET /accounts/all - Usuario autenticado:', user);
 
@@ -73,30 +72,149 @@ export class AccountController {
         const accounts = await this.accountService.findAll(officeId);
         return { accounts };
     }
+
     @Get('cbu')
-    // Decide qué autenticación necesita este endpoint:
-    // @UseGuards(JwtAuthGuard) // Si requiere usuario logueado (aunque no uses su oficina)
-    // @UseGuards(ApiKeyAuth) // Si requiere API Key
-    //@ApiKeyAuth(API_PERMISSIONS.ACCOUNTS_READ_CBUS) // Manteniendo tu ApiKeyAuth original
-    @ApiOperation({ summary: 'Get CBU for an active account in a specific office' })
-    // Cambia el nombre del parámetro en la documentación y en la URL
+    @ApiOperation({ summary: 'Get CBU using rotation system for a specific office' })
     @ApiQuery({ name: 'idAgent', required: true, description: 'ID of the office', type: String })
-    @ApiResponse({ status: 200, description: 'The CBU found for the office', type: CbuSingleResponseDto }) // CbuSingleResponseDto probablemente solo tiene { cbu: string }
-    @ApiResponse({ status: 400, description: 'officeId query parameter is missing' })
-    @ApiResponse({ status: 401, description: 'Unauthorized (Invalid API Key, if ApiKeyAuth is used)' })
+    @ApiResponse({ status: 200, description: 'The CBU selected using rotation system', type: CbuSingleResponseDto })
+    @ApiResponse({ status: 400, description: 'idAgent query parameter is missing' })
     @ApiResponse({ status: 404, description: 'No active account found for the specified office' })
-    async getCbuByOffice( // <-- Nombre de método cambiado
-        @Query('idAgent') officeId: string // <-- Parámetro renombrado y único necesario
+    async getCbuByOffice(
+        @Query('idAgent') officeId: string
     ): Promise<{ cbu: string }> {
         if (!officeId) {
             throw new BadRequestException('idAgent query parameter is required');
         }
-        console.log(`[AccountController] getCbuByOffice: Requesting CBU for officeId: ${officeId}`);
+        console.log(`[AccountController] getCbuByOffice: Requesting CBU with rotation for officeId: ${officeId}`);
 
-        // Llama a un método de servicio simplificado que solo necesita el officeId
-        const cbu = await this.accountService.findCbuByOffice(officeId);
+        // Usar la nueva lógica de rotación con monto mínimo para seleccionar la cuenta con menor accumulated_amount
+        const cbu = await this.accountService.getNextAvailableCbu(1, officeId);
 
         return { cbu };
+    }
+
+    @Get('cbu/rotation-status')
+    @ApiOperation({ summary: 'Get CBU rotation status showing accumulated amounts for all accounts' })
+    @ApiQuery({ name: 'idAgent', required: false, description: 'ID of the office', type: String })
+    @ApiResponse({ status: 200, description: 'CBU rotation status information' })
+    @ApiResponse({ status: 404, description: 'No active accounts found for the specified office' })
+    async getCbuRotationStatus(
+        @Query('idAgent') officeId?: string
+    ): Promise<{
+        status: string;
+        total_accounts: number;
+        accounts_below_limit: number;
+        accounts_at_limit: number;
+        max_limit: number;
+        next_available_cbu?: string;
+        accounts: Array<{
+            id: number;
+            name: string;
+            cbu: string;
+            accumulated_amount: number;
+            is_available: boolean;
+        }>;
+    }> {
+        console.log(`[AccountController] getCbuRotationStatus: Getting rotation status${officeId ? ` for office ${officeId}` : ''}`);
+
+        const MAX_AMOUNT_PER_ACCOUNT = 100;
+
+        const accounts = await this.accountService.findAll(officeId);
+        const activeAccounts = accounts.filter(account =>
+            account.wallet === 'mercadopago' && account.status === 'active'
+        );
+
+        if (!activeAccounts || activeAccounts.length === 0) {
+            throw new BadRequestException(`No active MercadoPago accounts found${officeId ? ` for office ${officeId}` : ''}`);
+        }
+
+        // Ordenar cuentas por accumulated_amount para mostrar el orden de rotación
+        const sortedAccounts = activeAccounts.sort((a, b) => {
+            const amountDiff = Number(a.accumulated_amount) - Number(b.accumulated_amount);
+            if (amountDiff === 0) {
+                return a.id - b.id; // Usar ID como criterio secundario
+            }
+            return amountDiff;
+        });
+
+        const accountsBelowLimit = sortedAccounts.filter(account =>
+            Number(account.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT
+        ).length;
+
+        const accountsAtLimit = sortedAccounts.length - accountsBelowLimit;
+
+        // Obtener el próximo CBU disponible
+        let nextAvailableCbu = undefined;
+        try {
+            nextAvailableCbu = await this.accountService.getNextAvailableCbu(1, officeId);
+        } catch (error) {
+            console.log('No se pudo obtener el próximo CBU disponible:', error.message);
+        }
+
+        const accountsInfo = sortedAccounts.map(account => ({
+            id: account.id,
+            name: account.name,
+            cbu: account.cbu,
+            accumulated_amount: Number(account.accumulated_amount),
+            is_available: Number(account.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT
+        }));
+
+        return {
+            status: 'success',
+            total_accounts: sortedAccounts.length,
+            accounts_below_limit: accountsBelowLimit,
+            accounts_at_limit: accountsAtLimit,
+            max_limit: MAX_AMOUNT_PER_ACCOUNT,
+            next_available_cbu: nextAvailableCbu,
+            accounts: accountsInfo
+        };
+    }
+
+    @Post('cbu/reset-rotation')
+    @UseGuards(JwtAuthGuard)
+    @ApiOperation({ summary: 'Reset accumulated amounts for all accounts (Admin only)' })
+    @ApiQuery({ name: 'idAgent', required: false, description: 'ID of the office', type: String })
+    @ApiResponse({ status: 200, description: 'Accumulated amounts reset successfully' })
+    @ApiResponse({ status: 401, description: 'Unauthorized' })
+    @ApiResponse({ status: 403, description: 'Forbidden - Only admins can reset rotation' })
+    async resetCbuRotation(
+        @Req() request: AuthenticatedRequest,
+        @Query('idAgent') officeId?: string
+    ): Promise<{ status: string; message: string; accounts_reset: number }> {
+        console.log(`[AccountController] resetCbuRotation: Resetting rotation${officeId ? ` for office ${officeId}` : ''}`);
+
+        const user = request.user;
+
+        // Verificar permisos - solo admins y superadmins pueden resetear
+        if (user?.role !== 'admin' && user?.role !== 'superadmin') {
+            throw new ForbiddenException('Only admins can reset CBU rotation');
+        }
+
+        // Si el usuario es admin (no superadmin), solo puede resetear su propia oficina
+        if (user?.role === 'admin' && (!officeId || officeId !== user.office)) {
+            throw new ForbiddenException('Admins can only reset rotation for their own office');
+        }
+
+        // Obtener cuentas activas
+        const accounts = await this.accountService.findAll(officeId);
+        const activeAccounts = accounts.filter(account =>
+            account.wallet === 'mercadopago' && account.status === 'active'
+        );
+
+        if (!activeAccounts || activeAccounts.length === 0) {
+            throw new BadRequestException(`No active MercadoPago accounts found${officeId ? ` for office ${officeId}` : ''}`);
+        }
+
+        // Resetear los accumulated_amounts
+        await this.accountService.resetAccumulatedAmounts(officeId);
+
+        console.log(`[AccountController] resetCbuRotation: Reset completed for ${activeAccounts.length} accounts`);
+
+        return {
+            status: 'success',
+            message: `CBU rotation reset successfully${officeId ? ` for office ${officeId}` : ''}`,
+            accounts_reset: activeAccounts.length
+        };
     }
 
     @Get(':id')
@@ -171,35 +289,6 @@ export class AccountController {
         console.log(`[AccountController] remove: Filtering by officeId: ${officeId} for account ID: ${id}`);
         // El servicio ya espera el officeId como segundo argumento
         return this.accountService.remove(id, officeId);
-    }
-
-    @Get('cbu/rotate')
-    @ApiOperation({ summary: 'Get CBU based on amount rotation system' })
-    @ApiQuery({ name: 'amount', required: true, description: 'Amount to be deposited', type: Number })
-    @ApiQuery({ name: 'idAgent', required: true, description: 'ID of the office', type: String })
-    @ApiResponse({ status: 200, description: 'CBU selected for the specified amount', type: CbuRotationResponseDto })
-    @ApiResponse({ status: 400, description: 'Missing required parameters' })
-    @ApiResponse({ status: 404, description: 'No active accounts found for the specified office' })
-    async getCbuByRotation(
-        @Query('amount') amount: number,
-        @Query('idAgent') officeId: string
-    ): Promise<CbuRotationResponseDto> {
-        if (!amount || !officeId) {
-            throw new BadRequestException('amount and idAgent query parameters are required');
-        }
-
-        if (isNaN(Number(amount)) || Number(amount) <= 0) {
-            throw new BadRequestException('amount must be a positive number');
-        }
-
-        console.log(`[AccountController] getCbuByRotation: Requesting CBU for amount: ${amount}, officeId: ${officeId}`);
-
-        const cbu = await this.accountService.getNextAvailableCbu(Number(amount), officeId);
-
-        return {
-            cbu,
-            amount_received: Number(amount)
-        };
     }
 
     @Post('reset-amounts')

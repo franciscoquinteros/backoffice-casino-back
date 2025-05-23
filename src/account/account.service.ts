@@ -248,7 +248,7 @@ export class AccountService {
     // Monto máximo por cuenta antes de rotar (en pesos)
     const MAX_AMOUNT_PER_ACCOUNT = 100;
 
-    // Obtener todas las cuentas activas de MercadoPago ordenadas por ID (secuencial)
+    // Obtener todas las cuentas activas de MercadoPago ordenadas por accumulated_amount
     const whereCondition: any = {
       wallet: 'mercadopago',
       status: 'active'
@@ -258,10 +258,10 @@ export class AccountService {
       whereCondition.agent = officeId;
     }
 
-    // Buscar cuentas ordenadas por ID (orden secuencial)
+    // Buscar cuentas ordenadas por accumulated_amount ascendente, luego por ID para consistencia
     const accounts = await this.accountRepository.find({
       where: whereCondition,
-      order: { id: 'ASC' }
+      order: { accumulated_amount: 'ASC', id: 'ASC' }
     });
 
     if (!accounts || accounts.length === 0) {
@@ -273,19 +273,35 @@ export class AccountService {
       Number(account.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT
     );
 
-    // Si todas las cuentas superan el límite, resetear la primera para volver a empezar
-    if (!selectedAccount && accounts.length > 0) {
-      selectedAccount = accounts[0]; // Tomar la primera cuenta (menor ID)
-      console.log(`AccountService: Todas las cuentas superan el límite. Reseteando la cuenta ${selectedAccount.name} (ID: ${selectedAccount.id})`);
+    // Si todas las cuentas superan el límite, resetear todas y empezar de nuevo
+    if (!selectedAccount) {
+      console.log(`AccountService: Todas las cuentas superan el límite. Reseteando todas las cuentas y empezando desde la primera.`);
 
-      // Resetear el monto acumulado de esta cuenta para reiniciar el ciclo
-      selectedAccount.accumulated_amount = 0;
-      await this.accountRepository.save(selectedAccount);
+      // Resetear todas las cuentas a 0
+      await this.resetAllAccountsToZero(accounts);
+
+      // Seleccionar la primera cuenta después del reset
+      selectedAccount = accounts[0];
+      console.log(`AccountService: Reseteando ciclo. Seleccionando la primera cuenta: ${selectedAccount.name} (ID: ${selectedAccount.id})`);
     }
 
     console.log(`AccountService: Seleccionado CBU ${selectedAccount.cbu} (Cuenta: ${selectedAccount.name}, ID: ${selectedAccount.id}, Acumulado: ${selectedAccount.accumulated_amount})`);
 
     return selectedAccount.cbu;
+  }
+
+  /**
+   * Resetea el accumulated_amount de todas las cuentas proporcionadas a 0
+   */
+  private async resetAllAccountsToZero(accounts: Account[]): Promise<void> {
+    console.log(`AccountService: Reseteando ${accounts.length} cuentas a 0`);
+
+    for (const account of accounts) {
+      account.accumulated_amount = 0;
+    }
+
+    await this.accountRepository.save(accounts);
+    console.log(`AccountService: ${accounts.length} cuentas reseteadas exitosamente`);
   }
 
   async updateAccountAccumulatedAmount(cbu: string, amount: number): Promise<void> {
@@ -300,13 +316,22 @@ export class AccountService {
       return;
     }
 
+    const previousAmount = Number(account.accumulated_amount);
+    const newAmount = previousAmount + Number(amount);
+
     // Actualizar el monto acumulado
-    account.accumulated_amount = Number(account.accumulated_amount) + Number(amount);
+    account.accumulated_amount = newAmount;
 
     // Guardar la actualización
     await this.accountRepository.save(account);
 
-    console.log(`AccountService: Monto acumulado actualizado para CBU ${cbu}. Nuevo acumulado: ${account.accumulated_amount}`);
+    console.log(`AccountService: Monto acumulado actualizado para CBU ${cbu}. Anterior: ${previousAmount}, Nuevo: ${newAmount}`);
+
+    // Verificar si la cuenta alcanzó el límite de 100
+    const MAX_AMOUNT_PER_ACCOUNT = 100;
+    if (newAmount >= MAX_AMOUNT_PER_ACCOUNT) {
+      console.log(`AccountService: La cuenta ${account.name} (CBU: ${cbu}) alcanzó el límite con ${newAmount}. Se moverá al final de la rotación.`);
+    }
   }
 
   async resetAccumulatedAmounts(officeId?: string): Promise<void> {

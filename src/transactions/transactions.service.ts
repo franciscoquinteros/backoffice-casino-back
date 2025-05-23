@@ -294,6 +294,7 @@ export class IpnService implements OnModuleInit {
         entity.createdAt?.toISOString() ||
         entity.updatedAt?.toISOString() ||
         null,
+      updated_at: entity.updatedAt?.toISOString() || null,
       description: entity.description,
       payment_method_id: entity.paymentMethodId,
       payer_id: entity.payerId,
@@ -356,7 +357,8 @@ export class IpnService implements OnModuleInit {
   async saveTransaction(transaction: Transaction): Promise<Transaction> {
     try {
       // Si la transacción tiene CBU pero no tiene account_name, intentamos buscar el nombre
-      if (transaction.cbu && !transaction.account_name) {
+      // Para "Bank Transfer" siempre buscar el nombre actualizado, incluso si ya tiene uno asignado
+      if (transaction.cbu && (transaction.description === 'Bank Transfer' || !transaction.account_name)) {
         // Buscar en memoria primero
         const accountByCbu = this.accounts.find(acc =>
           acc.cbu === transaction.cbu &&
@@ -847,16 +849,16 @@ export class IpnService implements OnModuleInit {
       if (matchingExternalDeposit) {
         console.log(`[IPN] ${savedMpTransaction.id}: ¡Coincidencia encontrada con depósito externo ID: ${matchingExternalDeposit.id}`);
 
-        // 1. La transacción MP queda en "Pending"
-        await this.updateTransactionStatus(savedMpTransaction.id.toString(), 'Match');
+        // 1. La transacción MP queda en "Match MP" (antes era "Match")
+        await this.updateTransactionStatus(savedMpTransaction.id.toString(), 'Match MP');
 
-        // 2. Cambiar el depósito externo a "Match MP"
-        await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Match MP');
+        // 2. Cambiar el depósito externo a "Match" (antes era "Match MP")
+        await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Match');
 
         // 3. Añadir referencias cruzadas entre ambas transacciones
         await this.updateTransactionInfo(matchingExternalDeposit.id.toString(), {
           referenceTransaction: savedMpTransaction.id.toString(),
-          description: `Depósito match con transacción MP ID: ${savedMpTransaction.id}`,
+          description: `Depósito match con transacción MP`,
           office: matchingExternalDeposit.office
         });
 
@@ -899,7 +901,7 @@ export class IpnService implements OnModuleInit {
         }
 
         console.log(`[IPN] ${savedMpTransaction.id}: Depósito externo ${matchingExternalDeposit.id} marcado como Match.`);
-        console.log(`[IPN] ${savedMpTransaction.id}: Transacción MP marcada como Aceptado.`);
+        console.log(`[IPN] ${savedMpTransaction.id}: Transacción MP marcada como Match MP.`);
       } else {
         console.log(`[IPN] ${savedMpTransaction.id}: No se encontró depósito externo coincidente.`);
       }
@@ -1175,6 +1177,13 @@ export class IpnService implements OnModuleInit {
         return false;
       }
 
+      // Verificar que la descripción coincida con la de transacciones IPN de Mercado Pago
+      const hasCorrectDescription = mpTx.description === 'Pago recibido vía IPN - Pendiente de validación';
+      if (!hasCorrectDescription) {
+        console.log(`[${opId}] La transacción ${mpTx.id} no tiene la descripción correcta de IPN MP: "${mpTx.description}"`);
+        return false;
+      }
+
       // Verificar criterio por criterio e informar
       const typeMatch = mpTx.type === 'deposit';
       if (!typeMatch) console.log(`[${opId}] La transacción ${mpTx.id} no es un depósito`);
@@ -1213,6 +1222,10 @@ export class IpnService implements OnModuleInit {
       const officeMatch = mpTx.office === savedUserTransaction.office;
       if (!officeMatch) console.log(`[${opId}] Las oficinas no coinciden: MP=${mpTx.office}, User=${savedUserTransaction.office}`);
 
+      // Verificar descripción IPN
+      const ipnDescriptionMatch = mpTx.description === 'Pago recibido vía IPN - Pendiente de validación';
+      if (!ipnDescriptionMatch) console.log(`[${opId}] La descripción no es de IPN MP: "${mpTx.description}"`);
+
       const isMatch = (
         typeMatch &&
         statusMatch &&
@@ -1220,7 +1233,8 @@ export class IpnService implements OnModuleInit {
         amountMatch &&
         emailMatch &&
         dateMatch &&
-        officeMatch
+        officeMatch &&
+        ipnDescriptionMatch
       );
 
       if (isMatch) {
@@ -1233,16 +1247,16 @@ export class IpnService implements OnModuleInit {
     if (matchingTransaction) {
       console.log(`[${opId}] ¡Coincidencia encontrada con transacción MP ID: ${matchingTransaction.id}`);
 
-      // 1. La transacción MP queda en "Pending"
-      await this.updateTransactionStatus(matchingTransaction.id.toString(), 'Match');
+      // 1. La transacción MP queda en "Match MP" (antes era "Match")
+      await this.updateTransactionStatus(matchingTransaction.id.toString(), 'Match MP');
 
-      // 2. Cambiar el depósito externo a "Match MP"
-      await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Match MP');
+      // 2. Cambiar el depósito externo a "Match" (antes era "Match MP")
+      await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Match');
 
       // 3. Añadir referencias cruzadas entre ambas transacciones
       await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
         referenceTransaction: matchingTransaction.id.toString(),
-        description: `Depósito match con transacción MP ID: ${matchingTransaction.id}`,
+        description: `Depósito match con transacción MP`,
         office: savedUserTransaction.office
       });
 
@@ -1306,7 +1320,7 @@ export class IpnService implements OnModuleInit {
       }
 
       console.log(`[${opId}] Depósito externo ${savedUserTransaction.id} marcado como Match.`);
-      console.log(`[${opId}] Transacción MP ${matchingTransaction.id} marcada como Aceptado.`);
+      console.log(`[${opId}] Transacción MP ${matchingTransaction.id} marcada como Match MP.`);
 
       const updatedUserTransaction = await this.getTransactionById(savedUserTransaction.id.toString());
       return {
@@ -1338,7 +1352,9 @@ export class IpnService implements OnModuleInit {
           match.id !== savedUserTransaction.id &&
           match.office === savedUserTransaction.office &&
           !match.relatedUserTransactionId &&
-          this.isDateCloseEnough(match.date_created, savedUserTransaction.date_created)
+          this.isDateCloseEnough(match.date_created, savedUserTransaction.date_created) &&
+          // --- VERIFICAR que la transacción MP tenga la descripción correcta de IPN ---
+          match.description === 'Pago recibido vía IPN - Pendiente de validación'
         );
 
         if (exactMatches.length > 0) {
@@ -1349,12 +1365,12 @@ export class IpnService implements OnModuleInit {
           console.log(`[${opId}] Usando primera coincidencia: ${directMatch.id}`);
 
           // Hacer el mismo proceso de matcheo que arriba
-          await this.updateTransactionStatus(directMatch.id.toString(), 'Match');
-          await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Match MP');
+          await this.updateTransactionStatus(directMatch.id.toString(), 'Match MP');
+          await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Match');
 
           await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
             referenceTransaction: directMatch.id.toString(),
-            description: `Depósito match (directo BD) con transacción MP ID: ${directMatch.id}`,
+            description: `Depósito match con transacción MP`,
             office: savedUserTransaction.office
           });
 
@@ -1638,12 +1654,24 @@ export class IpnService implements OnModuleInit {
   // Método auxiliar para buscar y actualizar el nombre de cuenta de una transacción en segundo plano
   private async findAccountNameForTransaction(transactionId: string | number, cbu: string): Promise<void> {
     try {
-      if (!cbu) return;
+      // Obtener la transacción actual
+      const transaction = await this.getTransactionById(transactionId.toString());
 
-      console.log(`Buscando nombre de cuenta para transacción ${transactionId} con CBU ${cbu}`);
+      if (!transaction) {
+        console.log(`Transacción ${transactionId} no encontrada`);
+        return;
+      }
+
+      // Para Bank Transfer siempre intentar actualizar el nombre, para otros tipos de transacción, solo si no tienen CBU o nombre
+      if (transaction.description !== 'Bank Transfer' && (!cbu || (transaction.account_name && transaction.account_name !== 'No disponible'))) {
+        console.log(`Transacción ${transactionId} ya tiene nombre de cuenta "${transaction.account_name}" o no tiene CBU`);
+        return;
+      }
+
+      console.log(`Buscando nombre de cuenta para transacción ${transactionId}${cbu ? ` con CBU ${cbu}` : ''}`);
 
       // Buscar la cuenta por CBU en la base de datos
-      const account = await this.accountService.findByCbu(cbu);
+      const account = cbu ? await this.accountService.findByCbu(cbu) : null;
 
       if (account && account.name) {
         console.log(`Encontrado nombre de cuenta "${account.name}" para transacción ${transactionId}`);
@@ -1667,7 +1695,7 @@ export class IpnService implements OnModuleInit {
           console.error(`Error al actualizar accountName en BD para transacción ${transactionId}:`, dbError);
         }
       } else {
-        console.log(`No se encontró cuenta para CBU ${cbu} de transacción ${transactionId}`);
+        console.log(`No se encontró cuenta para transacción ${transactionId}${cbu ? ` con CBU ${cbu}` : ''}`);
       }
     } catch (error) {
       console.error(`Error al buscar nombre de cuenta para transacción ${transactionId}:`, error);
@@ -2026,5 +2054,10 @@ export class IpnService implements OnModuleInit {
   // Método para obtener una referencia al AccountService
   getAccountService(): AccountService {
     return this.accountService;
+  }
+
+  // Método para obtener una referencia al TransactionRepository
+  getTransactionRepository() {
+    return this.transactionRepository;
   }
 }
