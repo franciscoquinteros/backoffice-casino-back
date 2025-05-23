@@ -855,7 +855,10 @@ export class IpnService implements OnModuleInit {
         // 2. Cambiar el depósito externo a "Match" (antes era "Match MP")
         await this.updateTransactionStatus(matchingExternalDeposit.id.toString(), 'Match');
 
-        // 3. Añadir referencias cruzadas entre ambas transacciones
+        // 3. Copiar external_reference entre las transacciones que hacen match
+        await this.copyExternalReferenceBetweenTransactions(savedMpTransaction.id.toString(), matchingExternalDeposit.id.toString());
+
+        // 4. Añadir referencias cruzadas entre ambas transacciones
         await this.updateTransactionInfo(matchingExternalDeposit.id.toString(), {
           referenceTransaction: savedMpTransaction.id.toString(),
           description: `Depósito match con transacción MP`,
@@ -867,7 +870,7 @@ export class IpnService implements OnModuleInit {
           office: savedMpTransaction.office
         });
 
-        // 4. Llamar al proxy con el payload requerido
+        // 5. Llamar al proxy con el payload requerido
         try {
           const proxyPayload = {
             user_id: parseInt(matchingExternalDeposit.idCliente?.toString() || '0', 10),
@@ -1253,7 +1256,10 @@ export class IpnService implements OnModuleInit {
       // 2. Cambiar el depósito externo a "Match" (antes era "Match MP")
       await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Match');
 
-      // 3. Añadir referencias cruzadas entre ambas transacciones
+      // 3. Copiar external_reference entre las transacciones que hacen match
+      await this.copyExternalReferenceBetweenTransactions(matchingTransaction.id.toString(), savedUserTransaction.id.toString());
+
+      // 4. Añadir referencias cruzadas entre ambas transacciones
       await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
         referenceTransaction: matchingTransaction.id.toString(),
         description: `Depósito match con transacción MP`,
@@ -1367,6 +1373,9 @@ export class IpnService implements OnModuleInit {
           // Hacer el mismo proceso de matcheo que arriba
           await this.updateTransactionStatus(directMatch.id.toString(), 'Match MP');
           await this.updateTransactionStatus(savedUserTransaction.id.toString(), 'Match');
+
+          // Copiar external_reference entre las transacciones que hacen match
+          await this.copyExternalReferenceBetweenTransactions(directMatch.id.toString(), savedUserTransaction.id.toString());
 
           await this.updateTransactionInfo(savedUserTransaction.id.toString(), {
             referenceTransaction: directMatch.id.toString(),
@@ -1699,6 +1708,43 @@ export class IpnService implements OnModuleInit {
       }
     } catch (error) {
       console.error(`Error al buscar nombre de cuenta para transacción ${transactionId}:`, error);
+    }
+  }
+
+  // Método auxiliar para copiar external_reference entre transacciones que hacen match
+  private async copyExternalReferenceBetweenTransactions(transaction1Id: string, transaction2Id: string): Promise<void> {
+    try {
+      // Obtener ambas transacciones
+      const tx1 = await this.getTransactionById(transaction1Id);
+      const tx2 = await this.getTransactionById(transaction2Id);
+
+      if (!tx1 || !tx2) {
+        console.warn(`No se pudieron obtener las transacciones para copiar external_reference: ${transaction1Id}, ${transaction2Id}`);
+        return;
+      }
+
+      console.log(`[CopyExternalRef] TX1 (${transaction1Id}): external_reference = "${tx1.external_reference}"`);
+      console.log(`[CopyExternalRef] TX2 (${transaction2Id}): external_reference = "${tx2.external_reference}"`);
+
+      // Determinar cuál tiene external_reference y cuál no
+      const tx1HasRef = tx1.external_reference && tx1.external_reference.trim() !== '';
+      const tx2HasRef = tx2.external_reference && tx2.external_reference.trim() !== '';
+
+      if (tx1HasRef && !tx2HasRef) {
+        // Copiar de tx1 a tx2
+        console.log(`[CopyExternalRef] Copiando external_reference de ${transaction1Id} a ${transaction2Id}: "${tx1.external_reference}"`);
+        await this.updateTransactionInfo(transaction2Id, { externalReference: tx1.external_reference });
+      } else if (tx2HasRef && !tx1HasRef) {
+        // Copiar de tx2 a tx1
+        console.log(`[CopyExternalRef] Copiando external_reference de ${transaction2Id} a ${transaction1Id}: "${tx2.external_reference}"`);
+        await this.updateTransactionInfo(transaction1Id, { externalReference: tx2.external_reference });
+      } else if (tx1HasRef && tx2HasRef) {
+        console.log(`[CopyExternalRef] Ambas transacciones ya tienen external_reference. TX1: "${tx1.external_reference}", TX2: "${tx2.external_reference}"`);
+      } else {
+        console.log(`[CopyExternalRef] Ninguna de las transacciones tiene external_reference válido`);
+      }
+    } catch (error) {
+      console.error(`[CopyExternalRef] Error al copiar external_reference entre transacciones ${transaction1Id} y ${transaction2Id}:`, error);
     }
   }
 
