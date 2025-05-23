@@ -1715,8 +1715,17 @@ export class IpnService implements OnModuleInit {
 
       const previousStatus = transaction.status;
 
+      // Preparar los datos de actualización
+      const updateData: any = { status };
+
+      // Si el estado es "Match MP", también actualizar la descripción
+      if (status === 'Match MP') {
+        updateData.description = 'Depósito match con transacción MP';
+        console.log(`[UpdateStatus] Actualizando transacción ${id} a estado "Match MP" con descripción "Depósito match con transacción MP"`);
+      }
+
       // Actualizar en BD
-      await this.transactionRepository.update(id, { status });
+      await this.transactionRepository.update(id, updateData);
 
       // Obtener la transacción actualizada
       const updatedEntity = await this.transactionRepository.findOne({ where: { id } });
