@@ -1083,7 +1083,8 @@ export class IpnService implements OnModuleInit {
       id: userDepositTransaction.id,
       cbu: userDepositTransaction.cbu,
       account_name: userDepositTransaction.account_name,
-      office: userDepositTransaction.office
+      office: userDepositTransaction.office,
+      status: userDepositTransaction.status
     });
 
     // Guardar la transacción en la base de datos
