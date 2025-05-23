@@ -649,8 +649,8 @@ export class IpnService implements OnModuleInit {
     const receiverId = apiData.collector_id || apiData.receiver_id;
     console.log(`[IPN] ${paymentId}: Receiver ID obtenido: ${receiverId}`);
 
-    // Buscar la cuenta asociada basada en el receiver_id
-    const associatedAccount = this.findAccountByReceiverId(receiverId?.toString());
+    // Buscar la cuenta asociada basada en el receiver_id usando búsqueda robusta
+    const associatedAccount = await this.findAccountByReceiverIdRobust(receiverId?.toString());
     console.log(`[IPN] ${paymentId}: Cuenta asociada encontrada:`, associatedAccount ?
       { id: associatedAccount.id, name: associatedAccount.name, agent: associatedAccount.agent } : 'No encontrada');
 
@@ -716,6 +716,14 @@ export class IpnService implements OnModuleInit {
     mpTransaction.receiver_id = receiverId?.toString() || null;
     mpTransaction.cbu = depositCbu || associatedAccount?.cbu;
     mpTransaction.office = officeFromAccount;
+
+    // Log específico para verificar qué cuenta se está usando para el account_name
+    if (accountInfo) {
+      console.log(`[IPN] ${paymentId}: Asignando account_name "${accountInfo.name}" de la cuenta ID: ${accountInfo.id} (encontrada por ${associatedAccount ? 'receiver_id' : 'CBU'})`);
+    } else {
+      console.log(`[IPN] ${paymentId}: No se encontró cuenta válida, usando valor por defecto "No disponible"`);
+    }
+
     mpTransaction.account_name = accountInfo?.name || 'No disponible';
 
     // Log específico para verificar el email
@@ -1977,6 +1985,54 @@ export class IpnService implements OnModuleInit {
     }
 
     console.log(`No se encontró cuenta para receiver_id: ${receiverId}`);
+    return undefined;
+  }
+
+  // Método robusto para buscar cuenta por receiver_id tanto en memoria como en base de datos
+  private async findAccountByReceiverIdRobust(receiverId: string): Promise<Account | undefined> {
+    console.log(`[FindAccountRobust] Buscando cuenta para receiver_id: ${receiverId}`);
+
+    if (!receiverId) {
+      console.warn("[FindAccountRobust] receiver_id es null o undefined.");
+      return undefined;
+    }
+
+    // Primero buscar en memoria
+    const accountInMemory = this.findAccountByReceiverId(receiverId);
+    if (accountInMemory) {
+      console.log(`[FindAccountRobust] Cuenta encontrada en memoria: ${accountInMemory.name} (ID: ${accountInMemory.id})`);
+      return accountInMemory;
+    }
+
+    // Si no se encuentra en memoria, buscar en la base de datos
+    console.log(`[FindAccountRobust] No encontrada en memoria, buscando en base de datos...`);
+    try {
+      // Buscar directamente en la base de datos usando el accountService
+      const allAccounts = await this.accountService.findAll();
+      const dbAccount = allAccounts.find(acc =>
+        acc.wallet === 'mercadopago' &&
+        acc.status === 'active' &&
+        acc.receiver_id &&
+        acc.receiver_id.toString() === receiverId.toString()
+      );
+
+      if (dbAccount) {
+        console.log(`[FindAccountRobust] Cuenta encontrada en BD: ${dbAccount.name} (ID: ${dbAccount.id}) para receiver_id ${receiverId}`);
+
+        // Agregar a las cuentas en memoria para futuras consultas
+        if (!this.accounts.some(acc => acc.id === dbAccount.id)) {
+          this.accounts.push(dbAccount);
+          console.log(`[FindAccountRobust] Cuenta ${dbAccount.name} añadida a memoria`);
+        }
+
+        return dbAccount;
+      } else {
+        console.log(`[FindAccountRobust] No se encontró cuenta en BD para receiver_id: ${receiverId}`);
+      }
+    } catch (error) {
+      console.error(`[FindAccountRobust] Error al buscar cuenta en BD:`, error);
+    }
+
     return undefined;
   }
 
