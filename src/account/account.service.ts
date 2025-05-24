@@ -242,6 +242,8 @@ export class AccountService {
     }
   }
 
+  private lastSelectedCbu: { [officeId: string]: string } = {};
+
   async getNextAvailableCbu(amount: number, officeId?: string): Promise<string> {
     console.log(`AccountService: Obteniendo siguiente CBU disponible para monto ${amount}${officeId ? ` en oficina ${officeId}` : ''}`);
 
@@ -268,7 +270,17 @@ export class AccountService {
       throw new NotFoundException(`No active MercadoPago accounts found${officeId ? ` for office ${officeId}` : ''}`);
     }
 
-    // Buscar la primera cuenta que no haya superado el límite
+    // Si hay una última cuenta seleccionada para esta oficina, verificar si podemos seguir usándola
+    const lastCbu = this.lastSelectedCbu[officeId || 'default'];
+    if (lastCbu) {
+      const lastAccount = accounts.find(acc => acc.cbu === lastCbu);
+      if (lastAccount && Number(lastAccount.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT) {
+        console.log(`AccountService: Continuando con última cuenta seleccionada ${lastCbu} (Acumulado: ${lastAccount.accumulated_amount})`);
+        return lastCbu;
+      }
+    }
+
+    // Si no hay última cuenta o ya alcanzó el límite, buscar la cuenta con menor accumulated_amount
     let selectedAccount = accounts.find(account =>
       Number(account.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT
     );
@@ -284,6 +296,9 @@ export class AccountService {
       selectedAccount = accounts[0];
       console.log(`AccountService: Reseteando ciclo. Seleccionando la primera cuenta: ${selectedAccount.name} (ID: ${selectedAccount.id})`);
     }
+
+    // Guardar la cuenta seleccionada para futuras solicitudes
+    this.lastSelectedCbu[officeId || 'default'] = selectedAccount.cbu;
 
     console.log(`AccountService: Seleccionado CBU ${selectedAccount.cbu} (Cuenta: ${selectedAccount.name}, ID: ${selectedAccount.id}, Acumulado: ${selectedAccount.accumulated_amount})`);
 
