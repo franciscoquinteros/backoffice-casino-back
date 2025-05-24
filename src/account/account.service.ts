@@ -250,7 +250,7 @@ export class AccountService {
     // Monto máximo por cuenta antes de rotar (en pesos)
     const MAX_AMOUNT_PER_ACCOUNT = 100;
 
-    // Obtener todas las cuentas activas de MercadoPago ordenadas por accumulated_amount
+    // Obtener todas las cuentas activas de MercadoPago
     const whereCondition: any = {
       wallet: 'mercadopago',
       status: 'active'
@@ -260,7 +260,24 @@ export class AccountService {
       whereCondition.agent = officeId;
     }
 
-    // Buscar cuentas ordenadas por accumulated_amount ascendente, luego por ID para consistencia
+    // Primero verificar si hay una última cuenta seleccionada para esta oficina
+    const lastCbu = this.lastSelectedCbu[officeId || 'default'];
+    if (lastCbu) {
+      // Buscar específicamente la última cuenta seleccionada
+      const lastAccount = await this.accountRepository.findOne({
+        where: {
+          ...whereCondition,
+          cbu: lastCbu
+        }
+      });
+
+      if (lastAccount && Number(lastAccount.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT) {
+        console.log(`AccountService: Continuando con última cuenta seleccionada ${lastCbu} (Acumulado: ${lastAccount.accumulated_amount})`);
+        return lastCbu;
+      }
+    }
+
+    // Si no hay última cuenta o ya alcanzó el límite, buscar la cuenta con menor accumulated_amount
     const accounts = await this.accountRepository.find({
       where: whereCondition,
       order: { accumulated_amount: 'ASC', id: 'ASC' }
@@ -270,17 +287,7 @@ export class AccountService {
       throw new NotFoundException(`No active MercadoPago accounts found${officeId ? ` for office ${officeId}` : ''}`);
     }
 
-    // Si hay una última cuenta seleccionada para esta oficina, verificar si podemos seguir usándola
-    const lastCbu = this.lastSelectedCbu[officeId || 'default'];
-    if (lastCbu) {
-      const lastAccount = accounts.find(acc => acc.cbu === lastCbu);
-      if (lastAccount && Number(lastAccount.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT) {
-        console.log(`AccountService: Continuando con última cuenta seleccionada ${lastCbu} (Acumulado: ${lastAccount.accumulated_amount})`);
-        return lastCbu;
-      }
-    }
-
-    // Si no hay última cuenta o ya alcanzó el límite, buscar la cuenta con menor accumulated_amount
+    // Buscar la primera cuenta que no haya superado el límite
     let selectedAccount = accounts.find(account =>
       Number(account.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT
     );
