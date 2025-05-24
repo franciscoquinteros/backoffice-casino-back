@@ -1525,7 +1525,7 @@ export class IpnService implements OnModuleInit {
           'transaction.office',
           'transaction.accountName'
         ])
-        .addSelect('account.name', 'account_name');
+        .addSelect('account.name', 'joined_account_table_name');
 
       // Añadir filtros si se proporcionan
       if (officeId) {
@@ -1608,7 +1608,7 @@ export class IpnService implements OnModuleInit {
           relatedUserTransactionId: raw.transaction_relatedUserTransactionId,
           office: raw.transaction_office,
           // Usar el nombre de cuenta del JOIN si está disponible, sino usar el guardado en accountName
-          account_name: raw.account_name || raw.transaction_accountName || 'No disponible'
+          account_name: raw.account_name || raw.transaction_account_name || 'No disponible'
         };
 
         // Log para depurar valor de payer_email
