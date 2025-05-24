@@ -87,8 +87,8 @@ export class AccountController {
         }
         console.log(`[AccountController] getCbuByOffice: Requesting CBU with rotation for officeId: ${officeId}`);
 
-        // Usar la nueva lógica de rotación con monto mínimo para seleccionar la cuenta con menor accumulated_amount
-        const cbu = await this.accountService.getNextAvailableCbu(1, officeId);
+        // Usar monto fijo de 100 para la rotación
+        const cbu = await this.accountService.getNextAvailableCbu(100, officeId);
 
         return { cbu };
     }
