@@ -247,10 +247,8 @@ export class AccountService {
   async getNextAvailableCbu(amount: number, officeId?: string): Promise<string> {
     console.log(`AccountService: Obteniendo siguiente CBU disponible para monto ${amount}${officeId ? ` en oficina ${officeId}` : ''}`);
 
-    // Monto máximo por cuenta antes de rotar (en pesos)
     const MAX_AMOUNT_PER_ACCOUNT = 100;
 
-    // Obtener todas las cuentas activas de MercadoPago
     const whereCondition: any = {
       wallet: 'mercadopago',
       status: 'active'
@@ -260,24 +258,28 @@ export class AccountService {
       whereCondition.agent = officeId;
     }
 
-    // Primero verificar si hay una última cuenta seleccionada para esta oficina
+    // PASO 1: Verificar si hay una cuenta actualmente en uso para esta oficina
     const lastCbu = this.lastSelectedCbu[officeId || 'default'];
+
     if (lastCbu) {
-      // Buscar específicamente la última cuenta seleccionada
-      const lastAccount = await this.accountRepository.findOne({
+      const currentAccount = await this.accountRepository.findOne({
         where: {
           ...whereCondition,
           cbu: lastCbu
         }
       });
 
-      if (lastAccount && Number(lastAccount.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT) {
-        console.log(`AccountService: Continuando con última cuenta seleccionada ${lastCbu} (Acumulado: ${lastAccount.accumulated_amount})`);
+      // Si la cuenta actual aún puede recibir más dinero, seguir usándola
+      if (currentAccount && Number(currentAccount.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT) {
+        console.log(`AccountService: Continuando con cuenta actual ${lastCbu} (Acumulado: ${currentAccount.accumulated_amount})`);
         return lastCbu;
+      } else if (currentAccount) {
+        console.log(`AccountService: Cuenta actual ${lastCbu} alcanzó el límite (${currentAccount.accumulated_amount}), buscando siguiente...`);
       }
     }
 
-    // Si no hay última cuenta o ya alcanzó el límite, buscar la cuenta con menor accumulated_amount
+    // PASO 2: Si no hay cuenta actual o alcanzó el límite, buscar la siguiente disponible
+    // Ordenar por accumulated_amount ASC para encontrar la que menos tiene
     const accounts = await this.accountRepository.find({
       where: whereCondition,
       order: { accumulated_amount: 'ASC', id: 'ASC' }
@@ -287,27 +289,22 @@ export class AccountService {
       throw new NotFoundException(`No active MercadoPago accounts found${officeId ? ` for office ${officeId}` : ''}`);
     }
 
-    // Buscar la primera cuenta que no haya superado el límite
+    // PASO 3: Buscar la primera cuenta disponible (que no haya alcanzado el límite)
     let selectedAccount = accounts.find(account =>
       Number(account.accumulated_amount) < MAX_AMOUNT_PER_ACCOUNT
     );
 
-    // Si todas las cuentas superan el límite, resetear todas y empezar de nuevo
+    // PASO 4: Si todas superan el límite, resetear y empezar de nuevo
     if (!selectedAccount) {
-      console.log(`AccountService: Todas las cuentas superan el límite. Reseteando todas las cuentas y empezando desde la primera.`);
-
-      // Resetear todas las cuentas a 0
+      console.log(`AccountService: Todas las cuentas superan el límite. Reseteando...`);
       await this.resetAllAccountsToZero(accounts);
-
-      // Seleccionar la primera cuenta después del reset
-      selectedAccount = accounts[0];
-      console.log(`AccountService: Reseteando ciclo. Seleccionando la primera cuenta: ${selectedAccount.name} (ID: ${selectedAccount.id})`);
+      selectedAccount = accounts[0]; // Tomar la primera después del reset
     }
 
-    // Guardar la cuenta seleccionada para futuras solicitudes
+    // PASO 5: Guardar la nueva cuenta seleccionada
     this.lastSelectedCbu[officeId || 'default'] = selectedAccount.cbu;
 
-    console.log(`AccountService: Seleccionado CBU ${selectedAccount.cbu} (Cuenta: ${selectedAccount.name}, ID: ${selectedAccount.id}, Acumulado: ${selectedAccount.accumulated_amount})`);
+    console.log(`AccountService: Nueva cuenta seleccionada: CBU ${selectedAccount.cbu} (${selectedAccount.name}, Acumulado: ${selectedAccount.accumulated_amount})`);
 
     return selectedAccount.cbu;
   }
