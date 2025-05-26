@@ -46,6 +46,14 @@ export interface Transaction {
   assignedTo?: string;
 }
 
+export class PayerIdentificationDto {
+  @ApiProperty({ required: false, example: 'name' })
+  type?: string;
+
+  @ApiProperty({ required: false, example: 'roberto' })
+  number?: string;
+}
+
 export class TransactionDto {
   @ApiProperty({ example: '123456789' })
   id: string | number;
@@ -73,8 +81,8 @@ export class TransactionDto {
 
   // Si PayerIdentification es una clase/DTO también, úsala aquí
   // Si es solo una interfaz, quizás necesites definirla como clase DTO también o anidarla
-  // @ApiProperty({ required: false, type: PayerIdentificationDto })
-  // payer_identification?: PayerIdentificationDto; // Asumiendo que creas PayerIdentificationDto
+  @ApiProperty({ required: false, type: PayerIdentificationDto }) // Usa el DTO anidado
+  payer_identification?: PayerIdentificationDto | null;// Asumiendo que creas PayerIdentificationDto
 
   @ApiProperty({ required: false })
   external_reference?: string;

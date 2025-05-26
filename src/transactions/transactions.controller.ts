@@ -107,7 +107,20 @@ export class TransactionsController {
 
     console.log(`[TransactionsController] getAllTransactions: Superadmin ${authenticatedUser.id} fetching all transactions`);
     const transactions = await this.ipnService.getTransactions();
+    const transactionsFromService: Transaction[] = await this.ipnService.getTransactions();
     console.log(`Devolviendo todas las transacciones (${transactions.length})`);
+    // LOG CRÍTICO: ¿Qué está a punto de retornar el controlador ANTES de la serialización de NestJS?
+    const specificWithdrawForLog = transactionsFromService.find(t => t.id === 'withdraw_1748266345329');
+    if (specificWithdrawForLog) {
+      console.log(`[CONTROLLER PRE-RETURN] Transaction ${specificWithdrawForLog.id}:`, JSON.stringify(specificWithdrawForLog, null, 2));
+    } else if (transactionsFromService.length > 0) {
+      const firstWithdraw = transactionsFromService.find(t => t.type === 'withdraw');
+      if (firstWithdraw) {
+        console.log('[CONTROLLER PRE-RETURN] First withdraw transaction from service:', JSON.stringify(firstWithdraw, null, 2));
+      } else {
+        console.log('[CONTROLLER PRE-RETURN] No withdraw transactions found. First transaction overall from service:', JSON.stringify(transactionsFromService[0], null, 2));
+      }
+    }
     return transactions;
   }
 

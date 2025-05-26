@@ -283,6 +283,11 @@ export class IpnService implements OnModuleInit {
 
   // Mapear entidad a tipo Transaction
   private mapEntityToTransaction(entity: TransactionEntity): Transaction {
+    if (entity.id === 'withdraw_1748266345329') { // O cualquier ID de prueba
+      console.log(`[MAP_ENTITY DEBUG] Entity ID: ${entity.id}`);
+      console.log(`[MAP_ENTITY DEBUG] entity.payerIdentification (from DB object):`, entity.payerIdentification);
+      console.log(`[MAP_ENTITY DEBUG] typeof entity.payerIdentification:`, typeof entity.payerIdentification);
+    }
     const mappedTransaction = {
       id: entity.id,
       type: entity.type,
@@ -1579,6 +1584,9 @@ export class IpnService implements OnModuleInit {
 
       // Mapear los resultados raw a objetos Transaction
       const transactions = rawResults.map(raw => {
+        if (raw.transaction_id === 'withdraw_1748266345329') { // O un ID de prueba
+          console.log(`[GET_TRANSACTIONS_RAW DEBUG] Raw data for ${raw.transaction_id}:`, raw);
+        }
         const transaction: Transaction = {
           id: raw.transaction_id,
           type: raw.transaction_type,
@@ -1598,10 +1606,11 @@ export class IpnService implements OnModuleInit {
           description: raw.transaction_description,
           payment_method_id: raw.transaction_paymentMethodId,
           payer_id: raw.transaction_payerId,
-          payer_email: raw.transaction_payerEmail || raw.transaction_payer_email || null, // Intentar ambos nombres de campo
+          payer_email: raw.transaction_payerEmail || raw.transaction_payer_email || null,
+          payer_identification: raw.transaction_payerIdentification || raw.transaction_payer_identification || null,
           external_reference: raw.transaction_externalReference || raw.transaction_external_reference || null,
           cbu: raw.transaction_cbu,
-          wallet_address: raw.transaction_walletAddress,
+          wallet_address: raw.transaction_type === 'withdraw' ? raw.transaction_wallet_address : null,
           receiver_id: raw.transaction_receiverId,
           idCliente: raw.transaction_idCliente || raw.transaction_id_cliente || null,
           reference_transaction: raw.transaction_referenceTransaction,
