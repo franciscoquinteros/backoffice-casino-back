@@ -245,90 +245,90 @@ export class AccountService {
   private lastSelectedCbu: { [officeId: string]: string } = {};
 
   // Método corregido en AccountService - usando accumulated_amount actual de la BD
-async getNextAvailableCbu(amount: number, officeId?: string): Promise<string> {
-  console.log(`AccountService: Obteniendo siguiente CBU disponible para monto ${amount}${officeId ? ` en oficina ${officeId}` : ''}`);
+  async getNextAvailableCbu(amount: number, officeId?: string): Promise<string> {
+    console.log(`AccountService: Obteniendo siguiente CBU disponible para monto ${amount}${officeId ? ` en oficina ${officeId}` : ''}`);
 
-  const MAX_AMOUNT_PER_ACCOUNT = 100;
+    const MAX_AMOUNT_PER_ACCOUNT = 300000;
 
-  const whereCondition: any = {
-    wallet: 'mercadopago',
-    status: 'active'
-  };
+    const whereCondition: any = {
+      wallet: 'mercadopago',
+      status: 'active'
+    };
 
-  if (officeId) {
-    whereCondition.agent = officeId;
-  }
+    if (officeId) {
+      whereCondition.agent = officeId;
+    }
 
-  // PASO 1: Verificar si hay una cuenta actualmente en uso para esta oficina
-  const lastCbu = this.lastSelectedCbu[officeId || 'default'];
+    // PASO 1: Verificar si hay una cuenta actualmente en uso para esta oficina
+    const lastCbu = this.lastSelectedCbu[officeId || 'default'];
 
-  if (lastCbu) {
-    // Obtener la cuenta ACTUAL de la base de datos (con accumulated_amount actualizado)
-    const currentAccount = await this.accountRepository.findOne({
-      where: {
-        ...whereCondition,
-        cbu: lastCbu
-      }
-    });
+    if (lastCbu) {
+      // Obtener la cuenta ACTUAL de la base de datos (con accumulated_amount actualizado)
+      const currentAccount = await this.accountRepository.findOne({
+        where: {
+          ...whereCondition,
+          cbu: lastCbu
+        }
+      });
 
-    if (currentAccount) {
-      const currentAccumulated = Number(currentAccount.accumulated_amount || 0);
-      
-      // Si la cuenta actual aún no ha alcanzado el límite, seguir usándola
-      if (currentAccumulated < MAX_AMOUNT_PER_ACCOUNT) {
-        console.log(`AccountService: Continuando con cuenta actual ${lastCbu} (Acumulado actual: ${currentAccumulated}/${MAX_AMOUNT_PER_ACCOUNT})`);
-        return lastCbu;
+      if (currentAccount) {
+        const currentAccumulated = Number(currentAccount.accumulated_amount || 0);
+
+        // Si la cuenta actual aún no ha alcanzado el límite, seguir usándola
+        if (currentAccumulated < MAX_AMOUNT_PER_ACCOUNT) {
+          console.log(`AccountService: Continuando con cuenta actual ${lastCbu} (Acumulado actual: ${currentAccumulated}/${MAX_AMOUNT_PER_ACCOUNT})`);
+          return lastCbu;
+        } else {
+          console.log(`AccountService: Cuenta actual ${lastCbu} alcanzó el límite (${currentAccumulated}), buscando siguiente...`);
+          // Limpiar la referencia ya que esta cuenta ya no sirve
+          delete this.lastSelectedCbu[officeId || 'default'];
+        }
       } else {
-        console.log(`AccountService: Cuenta actual ${lastCbu} alcanzó el límite (${currentAccumulated}), buscando siguiente...`);
-        // Limpiar la referencia ya que esta cuenta ya no sirve
+        console.log(`AccountService: Cuenta anterior ${lastCbu} ya no existe o no está activa, buscando nueva...`);
+        // Limpiar la referencia ya que esta cuenta ya no existe
         delete this.lastSelectedCbu[officeId || 'default'];
       }
-    } else {
-      console.log(`AccountService: Cuenta anterior ${lastCbu} ya no existe o no está activa, buscando nueva...`);
-      // Limpiar la referencia ya que esta cuenta ya no existe
-      delete this.lastSelectedCbu[officeId || 'default'];
     }
-  }
 
-  // PASO 2: Buscar la siguiente cuenta disponible (que tenga accumulated_amount < 100)
-  // Ordenar por accumulated_amount ASC para encontrar la que menos tiene
-  const accounts = await this.accountRepository.find({
-    where: whereCondition,
-    order: { accumulated_amount: 'ASC', id: 'ASC' }
-  });
-
-  if (!accounts || accounts.length === 0) {
-    throw new NotFoundException(`No active MercadoPago accounts found${officeId ? ` for office ${officeId}` : ''}`);
-  }
-
-  // PASO 3: Buscar la primera cuenta disponible (que no haya alcanzado el límite)
-  let selectedAccount = accounts.find(account => {
-    const currentAccumulated = Number(account.accumulated_amount || 0);
-    return currentAccumulated < MAX_AMOUNT_PER_ACCOUNT;
-  });
-
-  // PASO 4: Si todas las cuentas superan el límite, resetear y empezar de nuevo
-  if (!selectedAccount) {
-    console.log(`AccountService: Todas las cuentas superan el límite. Reseteando accumulated_amounts...`);
-    await this.resetAllAccountsToZero(accounts);
-    
-    // Después del reset, obtener las cuentas actualizadas
-    const resetAccounts = await this.accountRepository.find({
+    // PASO 2: Buscar la siguiente cuenta disponible (que tenga accumulated_amount < 300000)
+    // Ordenar por accumulated_amount ASC para encontrar la que menos tiene
+    const accounts = await this.accountRepository.find({
       where: whereCondition,
       order: { accumulated_amount: 'ASC', id: 'ASC' }
     });
-    
-    selectedAccount = resetAccounts[0]; // Tomar la primera después del reset
+
+    if (!accounts || accounts.length === 0) {
+      throw new NotFoundException(`No active MercadoPago accounts found${officeId ? ` for office ${officeId}` : ''}`);
+    }
+
+    // PASO 3: Buscar la primera cuenta disponible (que no haya alcanzado el límite)
+    let selectedAccount = accounts.find(account => {
+      const currentAccumulated = Number(account.accumulated_amount || 0);
+      return currentAccumulated < MAX_AMOUNT_PER_ACCOUNT;
+    });
+
+    // PASO 4: Si todas las cuentas superan el límite, resetear y empezar de nuevo
+    if (!selectedAccount) {
+      console.log(`AccountService: Todas las cuentas superan el límite. Reseteando accumulated_amounts...`);
+      await this.resetAllAccountsToZero(accounts);
+
+      // Después del reset, obtener las cuentas actualizadas
+      const resetAccounts = await this.accountRepository.find({
+        where: whereCondition,
+        order: { accumulated_amount: 'ASC', id: 'ASC' }
+      });
+
+      selectedAccount = resetAccounts[0]; // Tomar la primera después del reset
+    }
+
+    // PASO 5: Guardar la nueva cuenta seleccionada
+    this.lastSelectedCbu[officeId || 'default'] = selectedAccount.cbu;
+
+    const currentAccumulated = Number(selectedAccount.accumulated_amount || 0);
+    console.log(`AccountService: Cuenta seleccionada: CBU ${selectedAccount.cbu} (${selectedAccount.name}, Acumulado actual: ${currentAccumulated}/${MAX_AMOUNT_PER_ACCOUNT})`);
+
+    return selectedAccount.cbu;
   }
-
-  // PASO 5: Guardar la nueva cuenta seleccionada
-  this.lastSelectedCbu[officeId || 'default'] = selectedAccount.cbu;
-
-  const currentAccumulated = Number(selectedAccount.accumulated_amount || 0);
-  console.log(`AccountService: Cuenta seleccionada: CBU ${selectedAccount.cbu} (${selectedAccount.name}, Acumulado actual: ${currentAccumulated}/${MAX_AMOUNT_PER_ACCOUNT})`);
-
-  return selectedAccount.cbu;
-}
 
   /**
    * Resetea el accumulated_amount de todas las cuentas proporcionadas a 0
@@ -367,8 +367,8 @@ async getNextAvailableCbu(amount: number, officeId?: string): Promise<string> {
 
     console.log(`AccountService: Monto acumulado actualizado para CBU ${cbu}. Anterior: ${previousAmount}, Nuevo: ${newAmount}`);
 
-    // Verificar si la cuenta alcanzó el límite de 100
-    const MAX_AMOUNT_PER_ACCOUNT = 100;
+    // Verificar si la cuenta alcanzó el límite de 300000
+    const MAX_AMOUNT_PER_ACCOUNT = 300000;
     if (newAmount >= MAX_AMOUNT_PER_ACCOUNT) {
       console.log(`AccountService: La cuenta ${account.name} (CBU: ${cbu}) alcanzó el límite con ${newAmount}. Se moverá al final de la rotación.`);
     }

@@ -88,7 +88,7 @@ export class AccountController {
         console.log(`[AccountController] getCbuByOffice: Requesting CBU with rotation for officeId: ${officeId}`);
 
         // Usar monto fijo de 100 para la rotación
-        const cbu = await this.accountService.getNextAvailableCbu(100, officeId);
+        const cbu = await this.accountService.getNextAvailableCbu(300000, officeId);
 
         return { cbu };
     }
@@ -117,7 +117,7 @@ export class AccountController {
     }> {
         console.log(`[AccountController] getCbuRotationStatus: Getting rotation status${officeId ? ` for office ${officeId}` : ''}`);
 
-        const MAX_AMOUNT_PER_ACCOUNT = 100;
+        const MAX_AMOUNT_PER_ACCOUNT = 300000;
 
         const accounts = await this.accountService.findAll(officeId);
         const activeAccounts = accounts.filter(account =>
