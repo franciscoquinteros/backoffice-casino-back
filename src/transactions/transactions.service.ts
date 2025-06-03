@@ -1248,10 +1248,6 @@ export class IpnService implements OnModuleInit {
       const officeMatch = mpTx.office === savedUserTransaction.office;
       if (!officeMatch) console.log(`[${opId}] Las oficinas no coinciden: MP=${mpTx.office}, User=${savedUserTransaction.office}`);
 
-      // Verificar descripción IPN
-      const ipnDescriptionMatch = mpTx.description === 'Pago recibido vía IPN - Pendiente de validación';
-      if (!ipnDescriptionMatch) console.log(`[${opId}] La descripción no es de IPN MP: "${mpTx.description}"`);
-
       const isMatch = (
         typeMatch &&
         statusMatch &&
@@ -1260,7 +1256,7 @@ export class IpnService implements OnModuleInit {
         emailMatch &&
         dateMatch &&
         officeMatch &&
-        ipnDescriptionMatch
+        hasCorrectDescription // <-- Aseguramos que este criterio sea obligatorio
       );
 
       if (isMatch) {
