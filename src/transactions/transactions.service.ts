@@ -827,27 +827,21 @@ export class IpnService implements OnModuleInit {
       if (!matchingExternalDeposit) {
         console.log(`[IPN] ${savedMpTransaction.id}: No se encontró match en memoria, buscando en BD...`);
         try {
-          // Buscar transacciones pendientes en la BD que NO sean de Mercado Pago
+          // Buscar transacciones pendientes en la BD que coincidan en monto y email
           const pendingDepositsInDB = await this.transactionRepository.find({
             where: {
               type: 'deposit',
               status: 'Pending',
               office: savedMpTransaction.office,
-              description: Not('Pago recibido vía IPN - Pendiente de validación')
+              amount: savedMpTransaction.amount,
+              payerEmail: savedMpTransaction.payer_email
             }
           });
 
-          console.log(`[IPN] ${savedMpTransaction.id}: Encontradas ${pendingDepositsInDB.length} transacciones pendientes que no son de MP`);
-
-          // Filtrar para excluir también las Bank Transfer
-          const externalDeposits = pendingDepositsInDB.filter(tx =>
-            tx.description !== 'Bank Transfer'
-          );
-
-          console.log(`[IPN] ${savedMpTransaction.id}: Después de filtrar Bank Transfer, quedan ${externalDeposits.length} transacciones`);
+          console.log(`[IPN] ${savedMpTransaction.id}: Encontradas ${pendingDepositsInDB.length} transacciones pendientes con mismo monto y email`);
 
           // Mapear las entidades a Transaction
-          const pendingMappedDeposits = externalDeposits.map(entity => this.mapEntityToTransaction(entity));
+          const pendingMappedDeposits = pendingDepositsInDB.map(entity => this.mapEntityToTransaction(entity));
 
           // Buscar coincidencia con los mismos criterios
           matchingExternalDeposit = pendingMappedDeposits.find(externalTx => {
@@ -873,31 +867,42 @@ export class IpnService implements OnModuleInit {
               extOffice: externalTx.office
             });
 
+            // Verificar que las fechas estén lo suficientemente cercanas
+            const datesValid = externalTx.date_created && savedMpTransaction.date_created;
+            const dateMatch = datesValid && this.isDateCloseEnough(savedMpTransaction.date_created, externalTx.date_created);
+
+            // Verificar que una de las transacciones tenga la descripción de IPN y la otra no
+            const hasIpNDescription =
+              savedMpTransaction.description === 'Pago recibido vía IPN - Pendiente de validación' ||
+              externalTx.description === 'Pago recibido vía IPN - Pendiente de validación';
+
+            const otherTxHasIpNDescription =
+              savedMpTransaction.description === 'Pago recibido vía IPN - Pendiente de validación' &&
+              externalTx.description === 'Pago recibido vía IPN - Pendiente de validación';
+
             const isMatch = (
               typeof externalTx.amount === 'number' &&
               externalTx.amount > 0 &&
               externalTx.amount === savedMpTransaction.amount &&
               matchEmail &&
-              externalTx.date_created &&
-              savedMpTransaction.date_created &&
-              this.isDateCloseEnough(savedMpTransaction.date_created, externalTx.date_created) &&
+              dateMatch &&
               externalTx.office === savedMpTransaction.office &&
-              // Verificar que la transacción MP tenga la descripción correcta
-              savedMpTransaction.description === 'Pago recibido vía IPN - Pendiente de validación' &&
-              // Verificar que la otra transacción sea un depósito externo
-              externalTx.description !== 'Pago recibido vía IPN - Pendiente de validación' &&
-              externalTx.description !== 'Bank Transfer'
+              hasIpNDescription && // Una de las dos debe tener la descripción de IPN
+              !otherTxHasIpNDescription && // Pero no ambas
+              externalTx.description !== 'Bank Transfer' // Y ninguna debe ser Bank Transfer
             );
 
-            // Si encontramos coincidencia en la BD, añadirla a memoria
             if (isMatch) {
-              console.log(`[IPN] ${savedMpTransaction.id}: Encontrada coincidencia en BD con ID: ${matchingExternalDeposit.id}`);
-              // Añadirla a memoria para futuros matches
-              if (!this.transactions.some(tx => tx.id === matchingExternalDeposit.id)) {
-                this.transactions.push(matchingExternalDeposit);
-                console.log(`[IPN] ${savedMpTransaction.id}: Transacción ${matchingExternalDeposit.id} añadida a memoria`);
-              }
+              console.log(`[IPN] ${savedMpTransaction.id}: ¡MATCH ENCONTRADO! con transacción ${externalTx.id}`);
+              console.log(`[IPN] ${savedMpTransaction.id}: Detalles del match:`, {
+                mpDescription: savedMpTransaction.description,
+                extDescription: externalTx.description,
+                hasIpNDescription,
+                otherTxHasIpNDescription
+              });
             }
+
+            return isMatch;
           });
 
           // Si encontramos coincidencia en la BD, añadirla a memoria
