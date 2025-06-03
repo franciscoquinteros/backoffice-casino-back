@@ -785,6 +785,16 @@ export class IpnService implements OnModuleInit {
         const matchEmail = mpEmail && extEmail && mpEmail === extEmail;
         const matchDni = mpDni && extDni && mpDni === extDni;
 
+        // Verificar que una de las transacciones tenga la descripción específica de IPN
+        const hasIpNDescription =
+          savedMpTransaction.description === 'Pago recibido vía IPN - Pendiente de validación' ||
+          externalTx.description === 'Pago recibido vía IPN - Pendiente de validación';
+
+        if (!hasIpNDescription) {
+          console.log(`[IPN] ${savedMpTransaction.id}: No se puede hacer match porque ninguna transacción tiene la descripción de IPN`);
+          return false;
+        }
+
         // Criterios de coincidencia
         const isMatch = (
           externalTx.type === 'deposit' &&
@@ -798,7 +808,8 @@ export class IpnService implements OnModuleInit {
           (matchEmail || matchDni || matchDniEmail) &&
           externalTx.date_created && savedMpTransaction.date_created &&
           this.isDateCloseEnough(savedMpTransaction.date_created, externalTx.date_created) &&
-          externalTx.office === savedMpTransaction.office // Asegurar que coincidan las oficinas
+          externalTx.office === savedMpTransaction.office && // Asegurar que coincidan las oficinas
+          hasIpNDescription // Asegurar que una de las transacciones tenga la descripción de IPN
         );
 
         // Si encuentra coincidencia, loguear los detalles para diagnóstico
