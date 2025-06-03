@@ -523,19 +523,21 @@ export class TransactionsController {
 
       // Desglose por tipo
       deposits: {
-        total: filteredTransactions.filter(tx => tx.type === 'deposit').length,
-        amount: filteredTransactions.filter(tx => tx.type === 'deposit').reduce((sum, tx) => sum + (tx.amount || 0), 0),
+        total: filteredTransactions.filter(tx => tx.type === 'deposit' && (tx.status === 'Match MP' || tx.status === 'Aceptado')).length,
+        amount: filteredTransactions.filter(tx => tx.type === 'deposit' && (tx.status === 'Match MP' || tx.status === 'Aceptado')).reduce((sum, tx) => sum + (tx.amount || 0), 0),
         pending: filteredTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Pending').length,
         accepted: filteredTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Aceptado').length,
-        rejected: filteredTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Rechazado').length
+        rejected: filteredTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Rechazado').length,
+        matchMP: filteredTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Match MP').length
       },
 
       withdrawals: {
-        total: filteredTransactions.filter(tx => tx.type === 'withdraw').length,
-        amount: filteredTransactions.filter(tx => tx.type === 'withdraw').reduce((sum, tx) => sum + (tx.amount || 0), 0),
+        total: filteredTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').length,
+        amount: filteredTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').reduce((sum, tx) => sum + (tx.amount || 0), 0),
         pending: filteredTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Pending').length,
         accepted: filteredTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').length,
-        rejected: filteredTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Rechazado').length
+        rejected: filteredTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Rechazado').length,
+        matchMP: filteredTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Match MP').length
       },
 
       // Total neto (depósitos - retiros)
@@ -656,19 +658,21 @@ export class TransactionsController {
 
       // Desglose por tipo
       deposits: {
-        total: officeTransactions.filter(tx => tx.type === 'deposit').length,
-        amount: officeTransactions.filter(tx => tx.type === 'deposit').reduce((sum, tx) => sum + (tx.amount || 0), 0),
+        total: officeTransactions.filter(tx => tx.type === 'deposit' && (tx.status === 'Match MP' || tx.status === 'Aceptado')).length,
+        amount: officeTransactions.filter(tx => tx.type === 'deposit' && (tx.status === 'Match MP' || tx.status === 'Aceptado')).reduce((sum, tx) => sum + (tx.amount || 0), 0),
         pending: officeTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Pending').length,
         accepted: officeTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Aceptado').length,
-        rejected: officeTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Rechazado').length
+        rejected: officeTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Rechazado').length,
+        matchMP: officeTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Match MP').length
       },
 
       withdrawals: {
-        total: officeTransactions.filter(tx => tx.type === 'withdraw').length,
-        amount: officeTransactions.filter(tx => tx.type === 'withdraw').reduce((sum, tx) => sum + (tx.amount || 0), 0),
+        total: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').length,
+        amount: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').reduce((sum, tx) => sum + (tx.amount || 0), 0),
         pending: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Pending').length,
         accepted: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').length,
-        rejected: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Rechazado').length
+        rejected: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Rechazado').length,
+        matchMP: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Match MP').length
       },
 
       // Total neto (depósitos - retiros)
