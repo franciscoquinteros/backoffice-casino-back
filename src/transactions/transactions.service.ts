@@ -1,6 +1,6 @@
 import { forwardRef, Injectable, OnModuleInit, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindManyOptions, Repository } from 'typeorm';
+import { FindManyOptions, Repository, Not } from 'typeorm';
 import axios from 'axios';
 import { IpnNotification, DepositData, Transaction, PaymentData } from './transaction.types';
 // Importamos RussiansDepositData (asumiendo que tiene idAgent)
@@ -200,7 +200,7 @@ export class IpnService implements OnModuleInit {
 
         // Debug: Mostrar las transacciones pendientes para diagnóstico
         this.transactions.forEach(tx => {
-          console.log(`Transacción pendiente cargada: ID=${tx.id}, Amount=${tx.amount}, Email=${tx.payer_email}, CBU=${tx.cbu}, Office=${tx.office}`);
+          console.log(``);
         });
 
         // Actualizar automáticamente los nombres de cuentas de transacciones pendientes
@@ -317,10 +317,8 @@ export class IpnService implements OnModuleInit {
     };
 
     // Verificar el mapeo de payerEmail
-    console.log(`[MAP_ENTITY] Entidad ${entity.id} → Transacción: payerEmail=${entity.payerEmail} → payer_email=${mappedTransaction.payer_email}`);
 
     // Verificar el mapeo de accountName
-    console.log(`[MAP_ENTITY] Entidad ${entity.id} → Transacción: accountName=${entity.accountName} → account_name=${mappedTransaction.account_name}`);
 
     return mappedTransaction;
   }
@@ -829,18 +827,27 @@ export class IpnService implements OnModuleInit {
       if (!matchingExternalDeposit) {
         console.log(`[IPN] ${savedMpTransaction.id}: No se encontró match en memoria, buscando en BD...`);
         try {
-          // Buscar transacciones pendientes en la BD
+          // Buscar transacciones pendientes en la BD que NO sean de Mercado Pago
           const pendingDepositsInDB = await this.transactionRepository.find({
             where: {
               type: 'deposit',
               status: 'Pending',
-              // No filtramos por referenceTransaction aquí, lo haremos en el código
-              office: savedMpTransaction.office
+              office: savedMpTransaction.office,
+              description: Not('Pago recibido vía IPN - Pendiente de validación')
             }
           });
 
+          console.log(`[IPN] ${savedMpTransaction.id}: Encontradas ${pendingDepositsInDB.length} transacciones pendientes que no son de MP`);
+
+          // Filtrar para excluir también las Bank Transfer
+          const externalDeposits = pendingDepositsInDB.filter(tx =>
+            tx.description !== 'Bank Transfer'
+          );
+
+          console.log(`[IPN] ${savedMpTransaction.id}: Después de filtrar Bank Transfer, quedan ${externalDeposits.length} transacciones`);
+
           // Mapear las entidades a Transaction
-          const pendingMappedDeposits = pendingDepositsInDB.map(entity => this.mapEntityToTransaction(entity));
+          const pendingMappedDeposits = externalDeposits.map(entity => this.mapEntityToTransaction(entity));
 
           // Buscar coincidencia con los mismos criterios
           matchingExternalDeposit = pendingMappedDeposits.find(externalTx => {
@@ -853,7 +860,20 @@ export class IpnService implements OnModuleInit {
             const extEmail = externalTx.payer_email?.toLowerCase();
             const matchEmail = mpEmail && extEmail && mpEmail === extEmail;
 
-            return (
+            // Log detallado para diagnóstico
+            console.log(`[IPN] ${savedMpTransaction.id}: Evaluando match con transacción ${externalTx.id}:`, {
+              mpDescription: savedMpTransaction.description,
+              extDescription: externalTx.description,
+              mpEmail,
+              extEmail,
+              matchEmail,
+              mpAmount: savedMpTransaction.amount,
+              extAmount: externalTx.amount,
+              mpOffice: savedMpTransaction.office,
+              extOffice: externalTx.office
+            });
+
+            const isMatch = (
               typeof externalTx.amount === 'number' &&
               externalTx.amount > 0 &&
               externalTx.amount === savedMpTransaction.amount &&
@@ -861,8 +881,23 @@ export class IpnService implements OnModuleInit {
               externalTx.date_created &&
               savedMpTransaction.date_created &&
               this.isDateCloseEnough(savedMpTransaction.date_created, externalTx.date_created) &&
-              externalTx.office === savedMpTransaction.office
+              externalTx.office === savedMpTransaction.office &&
+              // Verificar que la transacción MP tenga la descripción correcta
+              savedMpTransaction.description === 'Pago recibido vía IPN - Pendiente de validación' &&
+              // Verificar que la otra transacción sea un depósito externo
+              externalTx.description !== 'Pago recibido vía IPN - Pendiente de validación' &&
+              externalTx.description !== 'Bank Transfer'
             );
+
+            // Si encontramos coincidencia en la BD, añadirla a memoria
+            if (isMatch) {
+              console.log(`[IPN] ${savedMpTransaction.id}: Encontrada coincidencia en BD con ID: ${matchingExternalDeposit.id}`);
+              // Añadirla a memoria para futuros matches
+              if (!this.transactions.some(tx => tx.id === matchingExternalDeposit.id)) {
+                this.transactions.push(matchingExternalDeposit);
+                console.log(`[IPN] ${savedMpTransaction.id}: Transacción ${matchingExternalDeposit.id} añadida a memoria`);
+              }
+            }
           });
 
           // Si encontramos coincidencia en la BD, añadirla a memoria
@@ -1259,6 +1294,13 @@ export class IpnService implements OnModuleInit {
       const officeMatch = mpTx.office === savedUserTransaction.office;
       if (!officeMatch) console.log(`[${opId}] Las oficinas no coinciden: MP=${mpTx.office}, User=${savedUserTransaction.office}`);
 
+      // Verificar que la otra transacción NO tenga la descripción de IPN
+      const otherTxHasIpNDescription = savedUserTransaction.description === 'Pago recibido vía IPN - Pendiente de validación';
+      if (otherTxHasIpNDescription) {
+        console.log(`[${opId}] No se puede hacer match porque ambas transacciones tienen descripción de IPN`);
+        return false;
+      }
+
       const isMatch = (
         typeMatch &&
         statusMatch &&
@@ -1267,7 +1309,8 @@ export class IpnService implements OnModuleInit {
         emailMatch &&
         dateMatch &&
         officeMatch &&
-        hasCorrectDescription // <-- Aseguramos que este criterio sea obligatorio
+        hasCorrectDescription && // Asegurar que una tenga la descripción de IPN
+        !otherTxHasIpNDescription // Asegurar que la otra NO tenga la descripción de IPN
       );
 
       if (isMatch) {
@@ -1375,6 +1418,8 @@ export class IpnService implements OnModuleInit {
             status: 'Pending',
             payerEmail: savedUserTransaction.payer_email,
             amount: savedUserTransaction.amount,
+            // Agregar condición para que sea una transacción de Mercado Pago por IPN
+            description: 'Pago recibido vía IPN - Pendiente de validación'
           }
         });
 
@@ -1389,8 +1434,9 @@ export class IpnService implements OnModuleInit {
           match.office === savedUserTransaction.office &&
           !match.relatedUserTransactionId &&
           this.isDateCloseEnough(match.date_created, savedUserTransaction.date_created) &&
-          // --- VERIFICAR que la transacción MP tenga la descripción correcta de IPN ---
-          match.description === 'Pago recibido vía IPN - Pendiente de validación'
+          // Verificar que la otra transacción sea un depósito externo
+          savedUserTransaction.description !== 'Pago recibido vía IPN - Pendiente de validación' &&
+          savedUserTransaction.description !== 'Bank Transfer'
         );
 
         if (exactMatches.length > 0) {
