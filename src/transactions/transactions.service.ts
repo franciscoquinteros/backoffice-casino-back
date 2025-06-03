@@ -788,8 +788,18 @@ export class IpnService implements OnModuleInit {
           savedMpTransaction.description === 'Pago recibido vía IPN - Pendiente de validación' ||
           externalTx.description === 'Pago recibido vía IPN - Pendiente de validación';
 
+        // Verificar que NO AMBAS transacciones sean IPN
+        const bothAreIpN =
+          savedMpTransaction.description === 'Pago recibido vía IPN - Pendiente de validación' &&
+          externalTx.description === 'Pago recibido vía IPN - Pendiente de validación';
+
         if (!hasIpNDescription) {
           console.log(`[IPN] ${savedMpTransaction.id}: No se puede hacer match porque ninguna transacción tiene la descripción de IPN`);
+          return false;
+        }
+
+        if (bothAreIpN) {
+          console.log(`[IPN] ${savedMpTransaction.id}: No se puede hacer match porque ambas transacciones son IPN`);
           return false;
         }
 
@@ -807,7 +817,8 @@ export class IpnService implements OnModuleInit {
           externalTx.date_created && savedMpTransaction.date_created &&
           this.isDateCloseEnough(savedMpTransaction.date_created, externalTx.date_created) &&
           externalTx.office === savedMpTransaction.office && // Asegurar que coincidan las oficinas
-          hasIpNDescription // Asegurar que una de las transacciones tenga la descripción de IPN
+          hasIpNDescription && // Asegurar que una tenga la descripción de IPN
+          !bothAreIpN // Asegurar que no sean ambas IPN
         );
 
         // Si encuentra coincidencia, loguear los detalles para diagnóstico
