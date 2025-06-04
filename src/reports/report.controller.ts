@@ -157,7 +157,11 @@ export class ReportController {
   async getTransactionsByStatus(@Req() request: RequestWithUser) {
     const officeId = request.user?.office;
     if (!officeId) throw new ForbiddenException('User office missing');
-    return this.reportService.getTransactionsByStatus(officeId);
+    // Leer parámetros de query
+    const period = request.query?.period as string | undefined;
+    const from = request.query?.from as string | undefined;
+    const to = request.query?.to as string | undefined;
+    return this.reportService.getTransactionsByStatus(officeId, period, from, to);
   }
 
   @Get('transaction-trend')

@@ -1252,25 +1252,62 @@ export class ReportService {
         return { total, deposits, withdraws };
     }
 
-    async getTransactionsByStatus(officeId: string) {
-        const transactions = await this.ipnService.getTransactions(officeId);
-        const statusMap: Record<string, number> = {
-            'Aceptado': 0,
-            'Rechazado': 0,
-            'Pendiente': 0,
-            'Match MP': 0
-        };
-        transactions.forEach(tx => {
-            // Normaliza el estado para que coincida con los tres permitidos
-            let status = (tx.status || '').toLowerCase();
-            if (status === 'aceptado' || status === 'approved') status = 'Aceptado';
-            else if (status === 'rechazado' || status === 'rejected' || status === 'error') status = 'Rechazado';
-            else if (status === 'pendiente' || status === 'pending') status = 'Pendiente';
-            else if (status === 'match mp') status = 'Match MP';
-            else return; // Ignora otros estados
-            statusMap[status] = (statusMap[status] || 0) + 1;
+    async getTransactionsByStatus(officeId: string, period?: string, from?: string, to?: string) {
+        let transactions = await this.ipnService.getTransactions(officeId);
+        // Filtrar por período si corresponde
+        if (period) {
+            let startDate: Date | null = null;
+            let endDate: Date | null = null;
+            const today = new Date();
+            if (period === 'day') {
+                startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+            } else if (period === 'week') {
+                const dayOfWeek = today.getDay() || 7;
+                startDate = new Date(today);
+                startDate.setDate(today.getDate() - dayOfWeek + 1);
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(today);
+                endDate.setDate(startDate.getDate() + 7);
+                endDate.setHours(0, 0, 0, 0);
+            } else if (period === 'month') {
+                startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+                endDate = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+            } else if (period === 'custom' && from && to) {
+                startDate = new Date(from);
+                endDate = new Date(to);
+                endDate.setDate(endDate.getDate() + 1); // incluir el día final
+            }
+            if (startDate && endDate) {
+                transactions = transactions.filter(tx => {
+                    if (!tx.date_created) return false;
+                    const txDate = new Date(tx.date_created);
+                    return txDate >= startDate && txDate < endDate;
+                });
+            }
+        }
+        // Estados a considerar
+        const estados = ['Aceptado', 'Rechazado', 'Pendiente', 'Match MP'];
+        // Inicializar estructura
+        const result: { type: string; name: string; value: number; count: number }[] = [];
+        ['deposit', 'withdraw'].forEach(type => {
+            estados.forEach(name => {
+                const filteredTxs = transactions.filter(tx => {
+                    // Normaliza el estado
+                    let status = (tx.status || '').toLowerCase();
+                    if (status === 'aceptado' || status === 'approved') status = 'Aceptado';
+                    else if (status === 'rechazado' || status === 'rejected' || status === 'error') status = 'Rechazado';
+                    else if (status === 'pendiente' || status === 'pending') status = 'Pendiente';
+                    else if (status === 'match mp') status = 'Match MP';
+                    else return false;
+                    return tx.type === type && status === name;
+                });
+                const value = filteredTxs.reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
+                const count = filteredTxs.length;
+                result.push({ type, name, value, count });
+            });
         });
-        return Object.entries(statusMap).map(([name, value]) => ({ name, value }));
+        return result;
     }
 
     async getTransactionTrend(officeId: string) {
