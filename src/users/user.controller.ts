@@ -232,17 +232,23 @@ export class UserController {
       }
 
       console.log('7b. Target user exists');
-      console.log('8. Requesting user role:', requestingUser.role, 'Target user office:', targetUser.office);
+      console.log('8. Requesting user role:', requestingUser.role, 'Target user role:', targetUser.role);
 
-      // If user is superadmin, allow deletion of any user
+      // CRITICAL BUSINESS RULE: An admin user can NEVER delete a superadmin user
+      if (requestingUser.role === 'admin' && targetUser.role === 'superadmin') {
+        console.log('9a. FORBIDDEN: Admin user attempted to delete superadmin');
+        throw new ForbiddenException("Admin users cannot delete superadmin users.");
+      }
+
+      // If user is superadmin, allow deletion of any user (including other superadmins)
       if (requestingUser.role === 'superadmin') {
-        console.log('9a. User is superadmin, allowing deletion of any user');
-        await this.userService.remove(id);
+        console.log('9b. User is superadmin, allowing deletion of any user');
+        await this.userService.removeWithRoleValidation(id, requestingUser.role);
         console.log('10. User successfully deleted');
         return;
       }
 
-      console.log('9b. User is not superadmin, checking office restriction');
+      console.log('9c. User is not superadmin, checking office restriction');
       // For non-superadmin users, check office restriction
       if (targetUser.office !== requestingUser.office) {
         console.log('11a. ERROR: Cannot delete users from other offices');
@@ -250,11 +256,54 @@ export class UserController {
       }
 
       console.log('11b. Offices match, allowing deletion');
-      await this.userService.remove(id);
+      await this.userService.removeWithRoleValidation(id, requestingUser.role);
       console.log('12. User successfully deleted');
     } catch (error) {
       console.log('ERROR during user deletion:', error);
       throw error;
     }
+  }
+
+  /**
+ * ENDPOINT DE INICIALIZACIÓN - Solo para crear el primer superadmin
+ * Este endpoint solo funciona si NO hay superadmins en el sistema
+ * No requiere autenticación pero está protegido por lógica de negocio
+ */
+  @Post('init-superadmin')
+  @UseGuards() // Sobrescribe los guards de la clase para no requerir autenticación
+  @ApiOperation({
+    summary: 'Initialize first superadmin (only works if no superadmins exist)',
+    description: 'This endpoint can only be used to create the first superadmin when no superadmins exist in the system. It will be disabled once at least one superadmin exists.'
+  })
+  @ApiResponse({ status: 201, description: 'First superadmin created successfully', type: UserResponseDto })
+  @ApiResponse({ status: 400, description: 'Bad request or superadmins already exist' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Superadmins already exist in the system' })
+  async initializeSuperadmin(
+    @Body() createUserDto: CreateUserDto
+  ): Promise<UserResponseDto> {
+    // Verificar que no haya superadmins existentes
+    const existingSuperadmins = await this.userService.findUsersByRole('superadmin');
+
+    if (existingSuperadmins.length > 0) {
+      console.warn(`[SECURITY] Attempt to use init-superadmin endpoint when ${existingSuperadmins.length} superadmin(s) already exist`);
+      throw new ForbiddenException('Cannot initialize superadmin: Superadmin users already exist in the system. Use regular user creation endpoints or CLI commands.');
+    }
+
+    // Forzar el rol a superadmin
+    const superadminDto: CreateUserDto = {
+      ...createUserDto,
+      role: 'superadmin'
+    };
+
+    console.log('Creating first superadmin via init endpoint:', {
+      username: superadminDto.username,
+      email: superadminDto.email,
+      office: superadminDto.office
+    });
+
+    const superadmin = await this.userService.create(superadminDto);
+
+    console.log(`✅ First superadmin created successfully: ID ${superadmin.id}, Email: ${superadmin.email}`);
+    return new UserResponseDto(superadmin);
   }
 }

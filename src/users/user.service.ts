@@ -1,5 +1,5 @@
 // src/users/user.service.ts
-import { Injectable, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, FindOptionsWhere } from 'typeorm'; // Importa FindOptionsWhere
 import { User } from "./entities/user.entity";
@@ -111,6 +111,21 @@ export class UserService {
         const user = await this.findOne(userId);
         if (!user) { throw new NotFoundException('Usuario no encontrado'); }
         await this.userRepository.remove(user);
+    }
+
+    // Remove with role validation - enhanced security method
+    async removeWithRoleValidation(userId: number, requestingUserRole: string): Promise<void> {
+        const targetUser = await this.findOne(userId);
+        if (!targetUser) {
+            throw new NotFoundException('Usuario no encontrado');
+        }
+
+        // CRITICAL BUSINESS RULE: An admin user can NEVER delete a superadmin user
+        if (requestingUserRole === 'admin' && targetUser.role === 'superadmin') {
+            throw new ForbiddenException("Admin users cannot delete superadmin users.");
+        }
+
+        await this.userRepository.remove(targetUser);
     }
 
     async findUsersByRole(role: string): Promise<User[]> {

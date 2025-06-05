@@ -25,7 +25,9 @@
     "migration:show": "npm run typeorm -- migration:show -d typeorm.config.ts",
     "migration:create": "npm run typeorm -- migration:create",
     "migration:run:prod": "cross-env NODE_ENV=production npm run migration:run",
-    "build:migrations": "tsc -p tsconfig.json"
+    "build:migrations": "tsc -p tsconfig.json",
+    "cli": "ts-node -r tsconfig-paths/register src/cli.ts",
+    "create-superadmin": "npm run cli create-superadmin"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.0",
@@ -48,6 +50,7 @@
     "class-validator": "^0.14.1",
     "glob": "^10.3.10",
     "mercadopago": "^2.3.0",
+    "nest-commander": "^3.17.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pg": "^8.13.1",

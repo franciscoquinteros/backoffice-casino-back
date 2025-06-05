@@ -16,6 +16,7 @@ import { OfficeModule } from './office/office.module';
 import { TransactionEntity } from './transactions/entities/transaction.entity';
 import { ProxyController } from './proxy/proxy.controller';
 import { ProxyModule } from './proxy/proxy.module';
+import { UserCommandsModule } from './users/commands/commands.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ProxyModule } from './proxy/proxy.module';
     HttpModule,
     AuthModule,
     UserModule,
+    UserCommandsModule,
     AccountModule,
     PaymentModule,
     ChatModule,
