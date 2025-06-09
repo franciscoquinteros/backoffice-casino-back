@@ -57,6 +57,12 @@ export class TransactionsController {
       startDate = new Date(from);
       endDate.setTime(new Date(to).getTime());
       endDate.setHours(23, 59, 59, 999); // Fin del día
+    } else if (period === 'custom' && (!from || !to)) {
+      // Si period es 'custom' pero no hay fechas, devolver datos históricos (todo el tiempo)
+      console.log('Custom period without dates - returning all historical data');
+      startDate = new Date('2020-01-01'); // Fecha muy atrás para incluir todo
+      endDate.setTime(now.getTime());
+      endDate.setHours(23, 59, 59, 999);
     } else if (period === 'day') {
       // Hoy
       startDate = new Date();
@@ -569,17 +575,20 @@ export class TransactionsController {
 
     offices.forEach(office => {
       const officeTransactions = filteredTransactions.filter(tx => tx.office === office);
+      const depositsAmount = officeTransactions
+        .filter(tx => tx.type === 'deposit' && (tx.status === 'Match MP' || tx.status === 'Aceptado'))
+        .reduce((sum, tx) => sum + (tx.amount || 0), 0);
+      const withdrawalsAmount = officeTransactions
+        .filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado')
+        .reduce((sum, tx) => sum + (tx.amount || 0), 0);
+
       stats.byOffice[office] = {
         total: officeTransactions.length,
-        totalAmount: officeTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0),
+        totalAmount: depositsAmount - withdrawalsAmount, // Depósitos - Retiros
         deposits: officeTransactions.filter(tx => tx.type === 'deposit').length,
         withdrawals: officeTransactions.filter(tx => tx.type === 'withdraw').length,
-        depositsAmount: officeTransactions
-          .filter(tx => tx.type === 'deposit')
-          .reduce((sum, tx) => sum + (tx.amount || 0), 0),
-        withdrawalsAmount: officeTransactions
-          .filter(tx => tx.type === 'withdraw')
-          .reduce((sum, tx) => sum + (tx.amount || 0), 0)
+        depositsAmount: depositsAmount,
+        withdrawalsAmount: withdrawalsAmount
       };
     });
 
@@ -650,16 +659,19 @@ export class TransactionsController {
     oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
 
     // Calcular estadísticas específicas de la oficina
+    const depositsAmount = officeTransactions.filter(tx => tx.type === 'deposit' && (tx.status === 'Match MP' || tx.status === 'Aceptado')).reduce((sum, tx) => sum + (tx.amount || 0), 0);
+    const withdrawalsAmount = officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').reduce((sum, tx) => sum + (tx.amount || 0), 0);
+
     const stats = {
       officeId,
       // Totales de la oficina
       totalTransactions: officeTransactions.length,
-      totalAmount: officeTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0),
+      totalAmount: depositsAmount - withdrawalsAmount, // Depósitos - Retiros
 
       // Desglose por tipo
       deposits: {
         total: officeTransactions.filter(tx => tx.type === 'deposit' && (tx.status === 'Match MP' || tx.status === 'Aceptado')).length,
-        amount: officeTransactions.filter(tx => tx.type === 'deposit' && (tx.status === 'Match MP' || tx.status === 'Aceptado')).reduce((sum, tx) => sum + (tx.amount || 0), 0),
+        amount: depositsAmount,
         pending: officeTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Pending').length,
         accepted: officeTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Aceptado').length,
         rejected: officeTransactions.filter(tx => tx.type === 'deposit' && tx.status === 'Rechazado').length,
@@ -668,7 +680,7 @@ export class TransactionsController {
 
       withdrawals: {
         total: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').length,
-        amount: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').reduce((sum, tx) => sum + (tx.amount || 0), 0),
+        amount: withdrawalsAmount,
         pending: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Pending').length,
         accepted: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Aceptado').length,
         rejected: officeTransactions.filter(tx => tx.type === 'withdraw' && tx.status === 'Rechazado').length,
@@ -694,7 +706,7 @@ export class TransactionsController {
     };
 
     // Calcular el total neto (depósitos - retiros)
-    stats.netTotal = stats.deposits.amount - stats.withdrawals.amount;
+    stats.netTotal = depositsAmount - withdrawalsAmount;
 
     // Calcular período anterior del mismo tamaño para comparación
     const periodDuration = endDate.getTime() - startDate.getTime();
