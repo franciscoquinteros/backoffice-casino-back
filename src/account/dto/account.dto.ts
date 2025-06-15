@@ -208,7 +208,7 @@ export class CbuSingleResponseDto {
   cbu: string;
 
   @ApiProperty({ type: String })
-  nnombredetitular: string;
+  nombredetitular: string;
 }
 
 export class CbuRotationResponseDto {

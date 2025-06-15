@@ -81,7 +81,7 @@ export class AccountController {
     @ApiResponse({ status: 404, description: 'No active account found for the specified office' })
     async getCbuByOffice(
         @Query('idAgent') officeId: string
-    ): Promise<{ cbu: string; nnombredetitular: string }> {
+    ): Promise<{ cbu: string; nombredetitular: string }> {
         if (!officeId) {
             throw new BadRequestException('idAgent query parameter is required');
         }
@@ -92,7 +92,7 @@ export class AccountController {
 
         return {
             cbu: accountData.cbu,
-            nnombredetitular: accountData.name
+            nombredetitular: accountData.name
         };
     }
 
