@@ -33,10 +33,10 @@ export class CbuRotationController {
 
         console.log(`[CbuRotationController] getCbuByRotation: Requesting CBU for amount: ${amount}, officeId: ${officeId}`);
 
-        const cbu = await this.accountService.getNextAvailableCbu(Number(amount), officeId);
+        const accountData = await this.accountService.getNextAvailableCbu(Number(amount), officeId);
 
         return {
-            cbu,
+            cbu: accountData.cbu,
             amount_received: Number(amount)
         };
     }
