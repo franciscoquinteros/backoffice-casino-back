@@ -245,7 +245,7 @@ export class AccountService {
   private lastSelectedCbu: { [officeId: string]: string } = {};
 
   // Método corregido en AccountService - usando accumulated_amount actual de la BD
-  async getNextAvailableCbu(amount: number, officeId?: string): Promise<string> {
+  async getNextAvailableCbu(amount: number, officeId?: string): Promise<{ cbu: string, name: string }> {
     console.log(`AccountService: Obteniendo siguiente CBU disponible para monto ${amount}${officeId ? ` en oficina ${officeId}` : ''}`);
 
     const MAX_AMOUNT_PER_ACCOUNT = 300000;
@@ -277,7 +277,7 @@ export class AccountService {
         // Si la cuenta actual aún no ha alcanzado el límite, seguir usándola
         if (currentAccumulated < MAX_AMOUNT_PER_ACCOUNT) {
           console.log(`AccountService: Continuando con cuenta actual ${lastCbu} (Acumulado actual: ${currentAccumulated}/${MAX_AMOUNT_PER_ACCOUNT})`);
-          return lastCbu;
+          return { cbu: currentAccount.cbu, name: currentAccount.name };
         } else {
           console.log(`AccountService: Cuenta actual ${lastCbu} alcanzó el límite (${currentAccumulated}), buscando siguiente...`);
           // Limpiar la referencia ya que esta cuenta ya no sirve
@@ -327,7 +327,7 @@ export class AccountService {
     const currentAccumulated = Number(selectedAccount.accumulated_amount || 0);
     console.log(`AccountService: Cuenta seleccionada: CBU ${selectedAccount.cbu} (${selectedAccount.name}, Acumulado actual: ${currentAccumulated}/${MAX_AMOUNT_PER_ACCOUNT})`);
 
-    return selectedAccount.cbu;
+    return { cbu: selectedAccount.cbu, name: selectedAccount.name };
   }
 
   /**

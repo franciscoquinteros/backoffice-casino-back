@@ -81,16 +81,19 @@ export class AccountController {
     @ApiResponse({ status: 404, description: 'No active account found for the specified office' })
     async getCbuByOffice(
         @Query('idAgent') officeId: string
-    ): Promise<{ cbu: string }> {
+    ): Promise<{ cbu: string; nnombredetitular: string }> {
         if (!officeId) {
             throw new BadRequestException('idAgent query parameter is required');
         }
         console.log(`[AccountController] getCbuByOffice: Requesting CBU with rotation for officeId: ${officeId}`);
 
         // Usar monto fijo de 100 para la rotación
-        const cbu = await this.accountService.getNextAvailableCbu(300000, officeId);
+        const accountData = await this.accountService.getNextAvailableCbu(300000, officeId);
 
-        return { cbu };
+        return {
+            cbu: accountData.cbu,
+            nnombredetitular: accountData.name
+        };
     }
 
     @Get('cbu/rotation-status')
@@ -146,7 +149,8 @@ export class AccountController {
         // Obtener el próximo CBU disponible
         let nextAvailableCbu = undefined;
         try {
-            nextAvailableCbu = await this.accountService.getNextAvailableCbu(1, officeId);
+            const nextAvailable = await this.accountService.getNextAvailableCbu(1, officeId);
+            nextAvailableCbu = nextAvailable.cbu;
         } catch (error) {
             console.log('No se pudo obtener el próximo CBU disponible:', error.message);
         }

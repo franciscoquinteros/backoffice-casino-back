@@ -206,6 +206,9 @@ export class AccountsResponseDto {
 export class CbuSingleResponseDto {
   @ApiProperty({ type: String })
   cbu: string;
+
+  @ApiProperty({ type: String })
+  nnombredetitular: string;
 }
 
 export class CbuRotationResponseDto {
