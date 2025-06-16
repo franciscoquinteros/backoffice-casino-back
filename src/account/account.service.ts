@@ -298,7 +298,12 @@ export class AccountService {
     });
 
     if (!accounts || accounts.length === 0) {
-      throw new NotFoundException(`No active MercadoPago accounts found${officeId ? ` for office ${officeId}` : ''}`);
+      const errorMessage = officeId
+        ? `No active CBU accounts found for agent/office ${officeId}. `
+        : `No active CBU accounts found in the system.`;
+
+      console.error(`AccountService: ${errorMessage}`);
+      throw new NotFoundException(errorMessage);
     }
 
     // PASO 3: Buscar la primera cuenta disponible (que no haya alcanzado el límite)

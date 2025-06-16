@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Delete, Put, HttpCode, HttpStatus, BadRequestException, Query, UseGuards, ParseIntPipe, Req, ForbiddenException } from '@nestjs/common'; // Añadir ParseIntPipe y Req
+import { Controller, Get, Post, Body, Param, Delete, Put, HttpCode, HttpStatus, BadRequestException, Query, UseGuards, ParseIntPipe, Req, ForbiddenException, NotFoundException } from '@nestjs/common'; // Añadir ParseIntPipe y Req
 import { ApiOperation, ApiResponse, ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger'; // Añadir ApiQuery y ApiBearerAuth
 import { AccountService } from './account.service';
 import { AccountDto, AccountsResponseDto, CbuRotationResponseDto, CbuSingleResponseDto, CreateAccountDto, GetCbuRotationDto, UpdateAccountDto } from './dto/account.dto';
@@ -78,7 +78,7 @@ export class AccountController {
     @ApiQuery({ name: 'idAgent', required: true, description: 'ID of the office', type: String })
     @ApiResponse({ status: 200, description: 'The CBU selected using rotation system', type: CbuSingleResponseDto })
     @ApiResponse({ status: 400, description: 'idAgent query parameter is missing' })
-    @ApiResponse({ status: 404, description: 'No active account found for the specified office' })
+    @ApiResponse({ status: 404, description: 'No active CBU accounts found for the specified agent/office' })
     async getCbuByOffice(
         @Query('idAgent') officeId: string
     ): Promise<{ cbu: string; nombredetitular: string }> {
@@ -87,13 +87,23 @@ export class AccountController {
         }
         console.log(`[AccountController] getCbuByOffice: Requesting CBU with rotation for officeId: ${officeId}`);
 
-        // Usar monto fijo de 100 para la rotación
-        const accountData = await this.accountService.getNextAvailableCbu(300000, officeId);
+        try {
+            // Usar monto fijo de 300000 para la rotación
+            const accountData = await this.accountService.getNextAvailableCbu(300000, officeId);
 
-        return {
-            cbu: accountData.cbu,
-            nombredetitular: accountData.name
-        };
+            return {
+                cbu: accountData.cbu,
+                nombredetitular: accountData.name
+            };
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                console.error(`[AccountController] getCbuByOffice: ${error.message}`);
+                throw error; // Re-lanzar el error del servicio con el mensaje específico
+            }
+            // Para cualquier otro tipo de error
+            console.error(`[AccountController] getCbuByOffice: Error inesperado:`, error);
+            throw new BadRequestException('Error al obtener CBU para el agente especificado');
+        }
     }
 
     @Get('cbu/rotation-status')
