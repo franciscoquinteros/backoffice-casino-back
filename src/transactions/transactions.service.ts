@@ -1131,13 +1131,25 @@ export class IpnService implements OnModuleInit {
       cbu: depositData.cbu,
       idCliente: depositData.idCliente,
       payer_email: depositData.email, // Email del depositante
-      external_reference: depositData.nombreDelTitular,
+      // Usar el nombreDelTitular si está disponible, sino usar username
+      external_reference: depositData.nombreDelTitular || depositData.username,
+      // Si tenemos DNI, incluirlo en payer_identification
+      payer_identification: depositData.dni ? {
+        type: 'DNI',
+        number: depositData.dni
+      } : null,
       office: depositData.idAgent,
       account_name: account_name // Asignar el nombre de cuenta
     };
 
-    // Log específico para verificar el email
-    console.log(`[${opId}] IMPORTANTE - Email para la transacción: ${userDepositTransaction.payer_email}`);
+    // Log específico para verificar los nuevos campos
+    console.log(`[${opId}] IMPORTANTE - Datos de transacción:`, {
+      email: userDepositTransaction.payer_email,
+      username: depositData.username,
+      dni: depositData.dni,
+      external_reference: userDepositTransaction.external_reference,
+      payer_identification: userDepositTransaction.payer_identification
+    });
 
     if (existingPendingOrAcceptedUserReport?.status === 'Aceptado') {
       userDepositTransaction.status = 'Aceptado';

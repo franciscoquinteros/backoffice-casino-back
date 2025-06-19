@@ -2,7 +2,8 @@ import { Controller, Post, Body, HttpException, HttpStatus } from '@nestjs/commo
 import { Transaction } from '../transaction.types'; // Asegúrate de que Transaction esté correctamente exportado
 import { IpnService } from '../transactions.service'; // Asegúrate de que IpnService esté correctamente exportado
 import { RussiansDepositData } from './russians-deposit.types'; // Asegúrate de que RussiansDepositData esté correctamente definido y exportado
-import { ApiTags, ApiOperation, ApiBody, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBody, ApiResponse, ApiProperty } from '@nestjs/swagger';
+import { IsString, IsNumber, IsEmail, IsOptional, IsNotEmpty, Min } from 'class-validator';
 
 // Estructura simplificada para la respuesta del endpoint
 interface SimpleResponse {
@@ -12,14 +13,97 @@ interface SimpleResponse {
 
 // Updated DTO to match the expected request payload
 class ExternalDepositDto {
+    @ApiProperty({
+        description: 'Monto del depósito',
+        example: 1500.00,
+        minimum: 0.01
+    })
+    @IsNumber()
+    @Min(0.01)
     amount: number;
+
+    @ApiProperty({
+        description: 'Nombre de usuario del depositante',
+        example: 'juanperez123'
+    })
+    @IsString()
+    @IsNotEmpty()
+    username: string;
+
+    @ApiProperty({
+        description: 'Email del depositante',
+        example: 'user@example.com'
+    })
+    @IsEmail()
+    @IsNotEmpty()
+    email: string;
+
+    @ApiProperty({
+        description: 'DNI del depositante',
+        example: '38295248'
+    })
+    @IsString()
+    @IsNotEmpty()
+    DNI: string;
+
+    @ApiProperty({
+        description: 'Email o DNI (campo de compatibilidad)',
+        example: 'user@example.com'
+    })
+    @IsString()
+    @IsNotEmpty()
     emailOrDni: string;
+
+    @ApiProperty({
+        description: 'ID del cliente',
+        example: '12345'
+    })
+    @IsString()
+    @IsNotEmpty()
     idClient: string;
+
+    @ApiProperty({
+        description: 'CBU de la cuenta bancaria',
+        example: '1234567890123456789012'
+    })
+    @IsString()
+    @IsNotEmpty()
     cbu: string;
-    idTransaction: string; // Este debería ser el ID único del depósito reportado por el usuario
-    idAgent?: string; // Este será el campo 'office' en la transacción
+
+    @ApiProperty({
+        description: 'ID único de la transacción',
+        example: 'DEP_20250117_001'
+    })
+    @IsString()
+    @IsNotEmpty()
+    idTransaction: string;
+
+    @ApiProperty({
+        description: 'ID del agente/oficina',
+        example: 'OFICINA_001',
+        required: true
+    })
+    @IsString()
+    @IsNotEmpty()
+    idAgent: string;
+
+    @ApiProperty({
+        description: 'Nombre del titular de la cuenta',
+        example: 'Juan Pérez',
+        required: false
+    })
+    @IsOptional()
+    @IsString()
     nombreDelTitular?: string;
-    dateCreated?: string; // Agregar si el sistema externo proporciona la fecha
+
+    @ApiProperty({
+        description: 'Fecha de creación (ISO string)',
+        example: '2025-01-17T15:30:00.000Z',
+        required: false
+    })
+    @IsOptional()
+    @IsString()
+    dateCreated?: string;
 }
 
 @ApiTags('Deposits')
@@ -39,12 +123,18 @@ export class ExternalDepositController {
 
         try {
             // 1. Validación básica de campos requeridos en el Controller
-            if (!body.amount || !body.emailOrDni || !body.idClient || !body.cbu || !body.idTransaction || !body.idAgent) {
+            if (!body.amount || !body.username || !body.email || !body.DNI || !body.idClient || !body.cbu || !body.idTransaction || !body.idAgent) {
                 console.warn(`[${requestId}] Validación básica fallida: Faltan campos requeridos.`);
-                throw new HttpException('Campos amount, emailOrDni, idClient, cbu, idTransaction, y idAgent son requeridos', HttpStatus.BAD_REQUEST);
+                throw new HttpException('Campos requeridos: amount, username, email, DNI, idClient, cbu, idTransaction, idAgent', HttpStatus.BAD_REQUEST);
             }
 
-            // 2. Preparar los datos en el formato esperado por el servicio
+            // 2. Validaciones adicionales
+            if (typeof body.amount !== 'number' || body.amount <= 0) {
+                console.warn(`[${requestId}] Validación de monto fallida: ${body.amount}`);
+                throw new HttpException('El campo amount debe ser un número positivo', HttpStatus.BAD_REQUEST);
+            }
+
+            // 3. Preparar los datos en el formato esperado por el servicio
             // Usamos body.idTransaction como idTransferencia y externalReference
             const depositData: RussiansDepositData = {
                 cbu: body.cbu,
@@ -52,21 +142,27 @@ export class ExternalDepositController {
                 idTransaction: body.idTransaction, // Usamos este como ID reportado
                 dateCreated: body.dateCreated || new Date().toISOString(), // Usar fecha si viene, sino current
                 idCliente: body.idClient,
-                email: body.emailOrDni, // Mapeamos emailOrDni a email para el servicio
+                email: body.email, // Usar el nuevo campo email separado
                 externalReference: body.idTransaction, // Puede ser útil guardar el idTransaction original aquí también
                 idAgent: body.idAgent, // Este es el 'office'
                 nombreDelTitular: body.nombreDelTitular, // Campos opcionales
                 idTransferencia: body.idTransaction, // Este es el ID único del depósito reportado por el usuario
+                // Campos adicionales nuevos
+                username: body.username, // Nuevo campo username
+                dni: body.DNI, // Nuevo campo DNI
+                // Mantener compatibilidad temporal con emailOrDni
+                payer_email: body.email || body.emailOrDni, // Priorizar email nuevo, fallback a emailOrDni
             };
 
-            console.log(`[${requestId}] Llamando a ipnService.validateWithMercadoPago con datos:`, depositData);
+            console.log(`[${requestId}] Datos recibidos: username=${body.username}, email=${body.email}, DNI=${body.DNI}, idClient=${body.idClient}, amount=${body.amount}, cbu=${body.cbu}, idAgent=${body.idAgent}`);
+            console.log(`[${requestId}] Llamando a ipnService.validateWithMercadoPago con datos mapeados`);
 
-            // 3. Delegar la validación completa al servicio
+            // 4. Delegar la validación completa al servicio
             const result = await this.ipnService.validateWithMercadoPago(depositData);
 
             console.log(`[${requestId}] Resultado de ipnService.validateWithMercadoPago:`, JSON.stringify(result));
 
-            // 4. Interpretar el resultado del servicio y devolver la respuesta simplificada
+            // 5. Interpretar el resultado del servicio y devolver la respuesta simplificada
             if (result.status === 'error') {
                 // Si el servicio devuelve un error (ej: CBU inválido para la oficina), responder 400
                 if (result.message?.includes('CBU proporcionado no es válido') || result.message?.includes('ID de transacción duplicado con estado de error')) {
