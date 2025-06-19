@@ -1,9 +1,10 @@
 import { Controller, Post, Body, HttpException, HttpStatus, UseFilters } from '@nestjs/common';
 import { Transaction } from '../transaction.types';
 import { IpnService } from '../transactions.service';
-import { ApiTags, ApiOperation, ApiBody, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBody, ApiResponse, ApiProperty } from '@nestjs/swagger';
 import { WithdrawData } from './russianswithdraw.types';
 import { CustomHttpExceptionFilter } from 'src/common/filters/http-exception.filter';
+import { IsString, IsNumber, IsEmail, IsOptional, IsNotEmpty, Min } from 'class-validator';
 
 interface WithdrawResponseTransaction {
   idClient: string;
@@ -28,17 +29,89 @@ interface WithdrawResult {
 
 // Updated DTO to match the expected request payload
 class ExternalWithdrawDto {
+  @ApiProperty({
+    description: 'Monto del retiro',
+    example: 50.00,
+    minimum: 0.01
+  })
+  @IsNumber()
+  @Min(0.01)
   amount: number;
+
+  @ApiProperty({
+    description: 'CBU de la cuenta destino',
+    example: '1234567890123456789012'
+  })
+  @IsString()
+  @IsNotEmpty()
   cbu: string;
+
+  @ApiProperty({
+    description: 'Número de WhatsApp',
+    example: '1156278436'
+  })
+  @IsString()
+  @IsNotEmpty()
+  NumeroDeWhatsapp: string; // Campo requerido
+
+  @ApiProperty({
+    description: 'ID del cliente',
+    example: '12345'
+  })
+  @IsString()
+  @IsNotEmpty()
   idClient: string;
+
+  @ApiProperty({
+    description: 'Username del player',
+    example: 'juanperez123'
+  })
+  @IsString()
+  @IsNotEmpty()
+  username: string; // Campo requerido - username del player
+
+  @ApiProperty({
+    description: 'ID del agente/oficina',
+    example: 'office_1'
+  })
+  @IsString()
+  @IsNotEmpty()
+  idAgent: string; // Ahora es requerido
+
+  @ApiProperty({
+    description: 'ID único del retiro',
+    example: 'withdraw_123'
+  })
+  @IsString()
+  @IsNotEmpty()
   idTransaction: string;
+
+  @ApiProperty({
+    description: 'Nombre del titular de la cuenta',
+    example: 'Juan Pérez'
+  })
+  @IsString()
+  @IsNotEmpty()
   nombreDelTitular: string;
 
-  // Make the following fields optional as they aren't in your example request
+  // Campos opcionales que teníamos antes pero no están en la nueva request
+  @ApiProperty({
+    description: 'Email del usuario',
+    example: 'user@example.com',
+    required: false
+  })
+  @IsOptional()
+  @IsEmail()
   email?: string;
+
+  @ApiProperty({
+    description: 'Nombre del usuario',
+    example: 'Juan',
+    required: false
+  })
+  @IsOptional()
+  @IsString()
   name?: string;
-  phoneNumber?: string;
-  idAgent?: string; // Optional field for agent ID
 }
 
 @ApiTags('Withdraws')
@@ -57,36 +130,28 @@ export class ExternalWithdrawController {
       console.log('Recibida solicitud de retiro externo:', body);
 
       // Updated validation to match the required fields in the example request
-      if (!body.amount || !body.cbu || !body.idClient || !body.idTransaction || !body.nombreDelTitular) {
+      if (!body.amount || !body.cbu || !body.idClient || !body.idTransaction || !body.nombreDelTitular || !body.username || !body.NumeroDeWhatsapp || !body.idAgent) {
         throw new HttpException(
-          'Se requieren los campos amount, cbu, idClient, idTransaction y nombreDelTitular',
+          'Se requieren los campos amount, cbu, idClient, idTransaction, nombreDelTitular, username, NumeroDeWhatsapp y idAgent',
           HttpStatus.BAD_REQUEST
         );
       }
 
-      // Create the WithdrawData object from the received data
+      // Mapping to the structure expected by validateWithdraw
       const withdrawData: WithdrawData = {
-        amount: body.amount,
-        wallet_address: body.cbu, // Using CBU as wallet address
-        withdraw_method: 'bank_transfer', // Default method
-        dateCreated: new Date().toISOString(),
+        idTransaction: body.idTransaction,
+        withdraw_method: 'bank_transfer', // Default withdrawal method
         idCliente: body.idClient,
-        nombreDelTitular: body.nombreDelTitular, // Add the account holder name
-        idAgent: body.idAgent
+        amount: body.amount,
+        wallet_address: body.cbu, // Use CBU as wallet address for bank transfers
+        dateCreated: new Date().toISOString(),
+        email: body.email || '', // Email is now optional
+        name: body.name || '', // Name is now optional
+        nombreDelTitular: body.nombreDelTitular,
+        phoneNumber: body.NumeroDeWhatsapp, // Map from NumeroDeWhatsapp to phoneNumber
+        username: body.username, // Map the required username field
+        idAgent: body.idAgent // Map the required idAgent field
       };
-
-      // Add optional fields if they exist
-      if (body.email) {
-        withdrawData['email'] = body.email;
-      }
-
-      if (body.name) {
-        withdrawData['name'] = body.name;
-      }
-
-      if (body.phoneNumber) {
-        withdrawData['phoneNumber'] = body.phoneNumber;
-      }
 
       console.log('Datos enviados a validateWithdraw:', withdrawData);
 
@@ -111,7 +176,7 @@ export class ExternalWithdrawController {
         // Add optional fields if they exist
         if (body.email) transaction.email = body.email;
         if (body.name) transaction.name = body.name;
-        if (body.phoneNumber) transaction.phoneNumber = body.phoneNumber;
+        if (body.NumeroDeWhatsapp) transaction.phoneNumber = body.NumeroDeWhatsapp;
 
         return {
           status: 'success',

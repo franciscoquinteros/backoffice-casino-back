@@ -11,4 +11,5 @@ export interface WithdrawData {
   nombreDelTitular?: string;
   idAgent?: string;
   payer_email?: string; // Añadido para soportar el email en los depósitos externos
+  username?: string; // Username del usuario que solicita el retiro
 }

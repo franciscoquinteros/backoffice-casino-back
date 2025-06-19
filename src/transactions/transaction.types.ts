@@ -44,6 +44,8 @@ export interface Transaction {
   office?: string;
   account_name?: string;
   assignedTo?: string;
+  username?: string; // Username del usuario (viene del campo username de la request)
+  phoneNumber?: string; // Número de WhatsApp (viene del campo NumeroDeWhatsapp de la request)
 }
 
 export class PayerIdentificationDto {

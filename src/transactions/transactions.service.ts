@@ -314,6 +314,9 @@ export class IpnService implements OnModuleInit {
       relatedUserTransactionId: entity.relatedUserTransactionId,
       office: entity.office,
       account_name: entity.accountName,
+      username: entity.username,
+      // Mapear phoneNumber desde la columna específica, con fallback a external_reference para retiros legacy
+      phoneNumber: entity.phoneNumber || (entity.type === 'withdraw' ? entity.externalReference : null),
     };
 
     // Verificar el mapeo de payerEmail
@@ -348,7 +351,11 @@ export class IpnService implements OnModuleInit {
     // CRÍTICO: Asegurarse de asignar account_name a accountName (la columna de BD)
     entity.accountName = transaction.account_name || null;
 
-    // Asignar el valor de assignedTo
+    // Asignar el valor de username
+    entity.username = transaction.username || null;
+
+    // Asignar el valor de phoneNumber
+    entity.phoneNumber = transaction.phoneNumber || null;
 
     console.log(`[MAP_TO_ENTITY] Mapeando transaction.account_name=${transaction.account_name} a entity.accountName=${entity.accountName}`);
 
@@ -1139,7 +1146,8 @@ export class IpnService implements OnModuleInit {
         number: depositData.dni
       } : null,
       office: depositData.idAgent,
-      account_name: account_name // Asignar el nombre de cuenta
+      account_name: account_name, // Asignar el nombre de cuenta
+      username: depositData.username, // Asignar el username del depositante
     };
 
     // Log específico para verificar los nuevos campos
@@ -1560,8 +1568,9 @@ export class IpnService implements OnModuleInit {
         type: 'name',
         number: withdrawData.nombreDelTitular
       },
-      external_reference: withdrawData.phoneNumber, // Usar phoneNumber como referencia externa
       office: withdrawData.idAgent, // <-- GUARDAR idAgent como 'office'
+      username: withdrawData.username, // Agregar username del usuario
+      phoneNumber: withdrawData.phoneNumber, // Guardar número de WhatsApp en columna específica
     };
 
     console.log('Creando transacción de retiro con office:', newTransaction.office, newTransaction); // <-- Log office
@@ -1609,7 +1618,9 @@ export class IpnService implements OnModuleInit {
           'transaction.referenceTransaction',
           'transaction.relatedUserTransactionId',
           'transaction.office',
-          'transaction.accountName'
+          'transaction.accountName',
+          'transaction.username',
+          'transaction.phoneNumber'
         ])
         .addSelect('account.name', 'joined_account_table_name');
 
@@ -1698,7 +1709,12 @@ export class IpnService implements OnModuleInit {
           relatedUserTransactionId: raw.transaction_relatedUserTransactionId,
           office: raw.transaction_office,
           // Usar el nombre de cuenta del JOIN si está disponible, sino usar el guardado en accountName
-          account_name: raw.account_name || raw.transaction_account_name || 'No disponible'
+          account_name: raw.account_name || raw.transaction_account_name || 'No disponible',
+          username: raw.transaction_username || null,
+          // Mapear phoneNumber desde la columna específica, con fallback a external_reference para retiros legacy
+          phoneNumber: raw.transaction_phoneNumber || raw.transaction_phone_number ||
+            (raw.transaction_type === 'withdraw' ?
+              (raw.transaction_externalReference || raw.transaction_external_reference) : null),
         };
 
         // Log para depurar valor de payer_email

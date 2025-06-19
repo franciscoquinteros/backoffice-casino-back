@@ -75,4 +75,10 @@ export class TransactionEntity {
     @Column({ name: 'account_name', nullable: true })
     accountName: string;
 
+    @Column({ nullable: true })
+    username: string;
+
+    @Column({ name: 'phone_number', nullable: true })
+    phoneNumber: string;
+
 }
