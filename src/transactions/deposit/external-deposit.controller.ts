@@ -15,7 +15,7 @@ interface SimpleResponse {
 class ExternalDepositDto {
     @ApiProperty({
         description: 'Monto del depósito',
-        example: 1500.00,
+        example: 100.00,
         minimum: 0.01
     })
     @IsNumber()
@@ -23,12 +23,13 @@ class ExternalDepositDto {
     amount: number;
 
     @ApiProperty({
-        description: 'Nombre de usuario del depositante',
-        example: 'juanperez123'
+        description: 'Nombre del titular de la cuenta',
+        example: 'Juan Pérez',
+        required: false
     })
+    @IsOptional()
     @IsString()
-    @IsNotEmpty()
-    username: string;
+    nombreDelTitular?: string;
 
     @ApiProperty({
         description: 'Email del depositante',
@@ -47,12 +48,12 @@ class ExternalDepositDto {
     DNI: string;
 
     @ApiProperty({
-        description: 'Email o DNI (campo de compatibilidad)',
-        example: 'user@example.com'
+        description: 'CBU de la cuenta bancaria',
+        example: '1234567890123456789012'
     })
     @IsString()
     @IsNotEmpty()
-    emailOrDni: string;
+    cbu: string;
 
     @ApiProperty({
         description: 'ID del cliente',
@@ -63,12 +64,12 @@ class ExternalDepositDto {
     idClient: string;
 
     @ApiProperty({
-        description: 'CBU de la cuenta bancaria',
-        example: '1234567890123456789012'
+        description: 'Nombre de usuario del depositante',
+        example: 'juanperez123'
     })
     @IsString()
     @IsNotEmpty()
-    cbu: string;
+    username: string;
 
     @ApiProperty({
         description: 'ID único de la transacción',
@@ -87,14 +88,15 @@ class ExternalDepositDto {
     @IsNotEmpty()
     idAgent: string;
 
+    // Campos adicionales opcionales para compatibilidad
     @ApiProperty({
-        description: 'Nombre del titular de la cuenta',
-        example: 'Juan Pérez',
+        description: 'Email o DNI (campo de compatibilidad)',
+        example: 'user@example.com',
         required: false
     })
     @IsOptional()
     @IsString()
-    nombreDelTitular?: string;
+    emailOrDni?: string;
 
     @ApiProperty({
         description: 'Fecha de creación (ISO string)',
@@ -150,8 +152,8 @@ export class ExternalDepositController {
                 // Campos adicionales nuevos
                 username: body.username, // Nuevo campo username
                 dni: body.DNI, // Nuevo campo DNI
-                // Mantener compatibilidad temporal con emailOrDni
-                payer_email: body.email || body.emailOrDni, // Priorizar email nuevo, fallback a emailOrDni
+                // Usar email como campo principal para payer_email
+                payer_email: body.email, // Usar email como campo principal
             };
 
             console.log(`[${requestId}] Datos recibidos: username=${body.username}, email=${body.email}, DNI=${body.DNI}, idClient=${body.idClient}, amount=${body.amount}, cbu=${body.cbu}, idAgent=${body.idAgent}`);
